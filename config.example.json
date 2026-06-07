@@ -2,7 +2,7 @@
   "device_host": "respeaker-xvf3800-assistant.local",
   "device_port": 6053,
   "llm_base_url": "https://api.mistral.ai/v1",
-  "llm_model": "mistral-medium-latest",
+  "llm_model": "mistral-small-latest",
   "stt_base_url": "https://api.mistral.ai/v1",
   "stt_model": "voxtral-mini-latest",
   "tts_provider": "voxtral",
@@ -21,7 +21,12 @@
       "args": ["ha-mcp@latest"],
       "url": "",
       "enabled": true,
-      "disabled_tools": []
+      "enabled_tools": [
+        "ha_search_entities",
+        "ha_get_state",
+        "ha_call_service",
+        "ha_bulk_control"
+      ]
     }
   ]
 }

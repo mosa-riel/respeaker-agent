@@ -88,21 +88,22 @@ async def trace_stream(request: Request) -> StreamingResponse:
         # Replay recent events first so a fresh tab is in sync, then go live.
         for evt in reversed(bus.recent(50)):
             yield f"data: {json.dumps(evt)}\n\n"
-        agen = bus.stream()
+        q = bus.subscribe()
         try:
             while True:
                 if await request.is_disconnected():
                     break
                 try:
-                    # Time out so we re-check disconnect and stay cancellable —
-                    # otherwise a quiet stream blocks forever and stalls shutdown.
-                    evt = await asyncio.wait_for(agen.__anext__(), timeout=15)
+                    # Poll with a timeout so we re-check disconnect and stay
+                    # cancellable. Cancelling queue.get() on timeout leaves the
+                    # subscription intact (no generator teardown).
+                    evt = await asyncio.wait_for(q.get(), timeout=15)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue
                 yield f"data: {json.dumps(evt)}\n\n"
         finally:
-            await agen.aclose()
+            bus.unsubscribe(q)
 
     return StreamingResponse(
         gen(),
@@ -214,7 +215,7 @@ async def list_mcp() -> JSONResponse:
             # Full tool catalog (name/description/enabled) for the UI toggle list —
             # only known after a successful connect.
             "all_tools": st.get("all_tools", []),
-            "disabled_tools": srv.disabled_tools,
+            "enabled_tools": srv.enabled_tools,
         })
     return JSONResponse({"servers": servers})
 
@@ -255,11 +256,11 @@ async def toggle_mcp(name: str, payload: dict) -> JSONResponse:
             continue
         if "enabled" in payload:
             m.enabled = bool(payload["enabled"])
-        if "disabled_tools" in payload:
-            dt = payload["disabled_tools"]
-            if not isinstance(dt, list) or not all(isinstance(x, str) for x in dt):
-                return JSONResponse({"ok": False, "error": "disabled_tools must be a list of strings"}, status_code=422)
-            m.disabled_tools = dt
+        if "enabled_tools" in payload:
+            et = payload["enabled_tools"]
+            if not isinstance(et, list) or not all(isinstance(x, str) for x in et):
+                return JSONResponse({"ok": False, "error": "enabled_tools must be a list of strings"}, status_code=422)
+            m.enabled_tools = et
         found = True
     if not found:
         return JSONResponse({"ok": False, "error": "not found"}, status_code=404)

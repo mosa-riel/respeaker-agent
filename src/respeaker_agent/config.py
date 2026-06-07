@@ -30,12 +30,13 @@ class McpServer:
     # .env and are inherited by the subprocess via os.environ — never put them here
     # (config.json is not a secret store).
     env: dict[str, str] = field(default_factory=dict)
-    # Per-tool enable/disable, managed from the UI. Default = expose everything the
-    # server offers; names listed here are hidden from the agent. This is tool
-    # CURATION (cut prompt bloat / unwanted tools), NOT a security boundary — real
-    # access control belongs to the MCP server's own credentials (e.g. a restricted
-    # Home Assistant token). Names are the server's own (unqualified) tool names.
-    disabled_tools: list[str] = field(default_factory=list)
+    # Per-tool enable list, managed from the UI (checked = enabled). EMPTY = expose
+    # everything the server offers. Non-empty = expose ONLY these (the others are
+    # hidden). This is tool CURATION — fewer tools = much lower latency and better
+    # tool-selection on small models — NOT a security boundary. Real access control
+    # belongs to the MCP server's own credentials (e.g. a non-admin Home Assistant
+    # token). Names are the server's own (unqualified) tool names.
+    enabled_tools: list[str] = field(default_factory=list)
 
     @property
     def transport(self) -> str:

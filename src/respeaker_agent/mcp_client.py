@@ -78,13 +78,13 @@ class McpManager:
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         resp = await session.list_tools()
-        disabled = set(srv.disabled_tools)
+        enabled = set(srv.enabled_tools)  # empty = all enabled
         all_tools: list[dict[str, Any]] = []  # every tool the server offers (for the UI)
         exposed: list[str] = []
         for t in resp.tools:
-            off = t.name in disabled
-            all_tools.append({"name": t.name, "description": (t.description or "").split("\n")[0][:140], "enabled": not off})
-            if off:
+            on = (not enabled) or (t.name in enabled)
+            all_tools.append({"name": t.name, "description": (t.description or "").split("\n")[0][:140], "enabled": on})
+            if not on:
                 continue
             qualified = f"{_slug(srv.name)}__{t.name}"
             self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.inputSchema or {}))

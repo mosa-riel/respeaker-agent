@@ -12,7 +12,7 @@ import asyncio
 import itertools
 import time
 from collections import deque
-from typing import Any, AsyncIterator
+from typing import Any
 
 # Canonical stages, in pipeline order. The UI colours by these.
 STAGES = ("device", "wake", "stt", "llm-req", "llm-rsp", "tool", "tts", "info", "error")
@@ -55,11 +55,14 @@ class TraceBus:
     def recent(self, limit: int = 200) -> list[dict[str, Any]]:
         return list(itertools.islice(self._buf, limit))
 
-    async def stream(self) -> AsyncIterator[dict[str, Any]]:
+    def subscribe(self) -> "asyncio.Queue[dict[str, Any]]":
+        """Register a live subscriber. The caller polls the queue (e.g. with a
+        timeout) and MUST call `unsubscribe` when done. Polling with a timeout is
+        safe — cancelling a `queue.get()` leaves the subscription intact (unlike
+        cancelling an async-generator step, which would tear the generator down)."""
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=200)
         self._subs.add(q)
-        try:
-            while True:
-                yield await q.get()
-        finally:
-            self._subs.discard(q)
+        return q
+
+    def unsubscribe(self, q: "asyncio.Queue[dict[str, Any]]") -> None:
+        self._subs.discard(q)

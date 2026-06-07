@@ -297,8 +297,11 @@
 		async function saveTools(name) {
 			const box = document.querySelector('.mcp-tools[data-server="' + name.replace(/"/g, '\\"') + '"]');
 			if (!box) return;
-			const disabled_tools = [...box.querySelectorAll('input[type=checkbox]')].filter(c => !c.checked).map(c => c.dataset.tool);
-			const r = await (await fetch('/api/mcp/' + encodeURIComponent(name), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled_tools }) })).json();
+			const boxes = [...box.querySelectorAll('input[type=checkbox]')];
+			const checked = boxes.filter(c => c.checked).map(c => c.dataset.tool);
+			// all checked → [] means "all enabled" (also picks up future tools)
+			const enabled_tools = checked.length === boxes.length ? [] : checked;
+			const r = await (await fetch('/api/mcp/' + encodeURIComponent(name), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled_tools }) })).json();
 			$('mcp-note').textContent = r.note || r.error || '';
 		}
 		async function toggleMcp(name, enabled) {
