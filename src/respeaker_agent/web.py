@@ -198,6 +198,13 @@ async def put_config(payload: dict) -> JSONResponse:
         setattr(settings, key, num)
     for key in {"voice_enabled", "voice_followup"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
+    # Don't let a scalar-settings save clobber mcp_servers edited in config.json
+    # (stdio servers are added there; they only take effect on restart anyway).
+    # mcp_servers are managed by the /api/mcp endpoints, not here.
+    try:
+        settings.mcp_servers = Settings.load().mcp_servers
+    except Exception:  # noqa: BLE001
+        pass
     settings.save()
     return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})
 
