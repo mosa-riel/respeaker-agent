@@ -196,7 +196,7 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    for key in {"voice_enabled"} & payload.keys():
+    for key in {"voice_enabled", "voice_followup"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
     settings.save()
     return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})

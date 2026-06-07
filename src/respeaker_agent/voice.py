@@ -66,6 +66,7 @@ class VoicePipeline:
         self._conv_id = "voice"
         # server-side VAD state (reset per utterance)
         self._finalizing = False
+        self._ended = False
         self._speech = False
         self._silence_ms = 0.0
         self._heard_ms = 0.0
@@ -108,6 +109,7 @@ class VoicePipeline:
         self._buf = bytearray()
         self._conv_id = conversation_id or "voice"
         self._finalizing = False
+        self._ended = False
         self._speech = False
         self._silence_ms = 0.0
         self._heard_ms = 0.0
@@ -179,7 +181,7 @@ class VoicePipeline:
             self._trace.emit("error", f"voice turn failed: {err}", level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
         finally:
-            self._event(_EVT.VOICE_ASSISTANT_RUN_END)
+            self._run_end()
             self._reset()
 
     def _reset(self) -> None:
@@ -225,14 +227,34 @@ class VoicePipeline:
         # Show the spoken reply (relevant); keep the url/size in the payload.
         self._trace.emit("tts", result.text, direction="out",
                          data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None, "url": url})
-        self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
-        # Hold the turn until playback finishes (the device plays the URL async) so the
-        # run doesn't end / re-arm mid-sentence. Duration from the FLAC header. The
-        # device only STARTS playing ~1s after we send the URL (fetch + decode +
-        # buffer), so add a generous tail buffer or RUN_END clips the end.
-        if secs:
-            await asyncio.sleep(min(secs + 1.6, 40.0))
+        if self._s.voice_followup:
+            # Announce path: end this run, then play the reply via the announce API
+            # which AWAITS real playback end (no tail-clipping / duration guessing) and
+            # start_conversation re-opens the mic — follow-up without a new wake word.
+            self._run_end()
+            assert self._cli is not None
+            try:
+                await self._cli.send_voice_assistant_announcement_await_response(
+                    media_id=url, timeout=min((secs or 6) + 25, 120.0),
+                    text=result.text, start_conversation=True)
+            except Exception as err:  # noqa: BLE001
+                self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
+        else:
+            self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
+            # Hold the turn until playback finishes (device plays the URL async). It
+            # only STARTS ~1s after we send the URL (fetch+decode+buffer), so a
+            # generous tail buffer keeps RUN_END from clipping the end.
+            if secs:
+                await asyncio.sleep(min(secs + 1.6, 40.0))
         self.last_activity = "klaar"
+
+    def _run_end(self) -> None:
+        """Send RUN_END at most once per turn (the announce/follow-up path ends the
+        run early, and _finish's finally must not send a second one)."""
+        if self._ended:
+            return
+        self._ended = True
+        self._event(_EVT.VOICE_ASSISTANT_RUN_END)
 
     def _event(self, event_type: VoiceAssistantEventType, data: dict[str, str] | None = None) -> None:
         if self._cli is not None:
