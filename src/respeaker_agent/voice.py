@@ -25,7 +25,6 @@ from typing import Any
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
-from .audio import int16_to_wav_bytes
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
 from .home_context import HomeContext
@@ -37,6 +36,7 @@ from .tts_server import TTSAudioServer
 _LOGGER = logging.getLogger(__name__)
 _EVT = VoiceAssistantEventType
 DEVICE_MIC_RATE = 16000  # ESPHome voice assistant mic stream
+_CONTENT_TYPES = {"flac": "audio/flac", "mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg"}
 
 
 class VoicePipeline:
@@ -113,6 +113,10 @@ class VoicePipeline:
         self.last_activity = "luistert…"
         self._trace.emit("wake", wake_word_phrase or "(wake word)", data={"conversation_id": self._conv_id, "flags": flags})
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
+        # Enter the listening phase NOW (drives the device's listening LEDs) — the
+        # transcript comes later in STT_END. (Sending STT_START after speech ended
+        # would skip the listening animation entirely.)
+        self._event(_EVT.VOICE_ASSISTANT_STT_START)
         return 0  # API audio: audio arrives via handle_audio, no separate port
 
     async def _on_audio(self, data: bytes, data2: bytes | None) -> None:
@@ -208,15 +212,15 @@ class VoicePipeline:
         assert self._cli is not None
         self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
         # This firmware plays TTS via its media_player fetching a URL ("No url in
-        # TTS_END event" otherwise). Synthesize the full reply, publish it as a WAV
-        # on the LAN audio server, and hand the device the URL. The device resamples
-        # (its media pipeline is 48 kHz) — we serve 16 kHz mono WAV.
-        pcm = await self._tts.synth(result.text)
-        wav = int16_to_wav_bytes(np.frombuffer(pcm, dtype="<i2"), self._s.tts_out_rate)
-        token = uuid.uuid4().hex
-        self._audio_srv.publish(token, wav)
-        url = self._audio_srv.url_for(token)
-        self._trace.emit("tts", f"serving reply ({len(wav)} B) at {url}", direction="out")
+        # TTS_END event" otherwise) and decodes by type — its pipeline is FLAC and it
+        # rejects WAV. Ask the engine for the configured format, publish it on the LAN
+        # audio server, hand the device the URL; it resamples to its 48 kHz pipeline.
+        fmt = self._s.tts_voice_format
+        data = await self._tts.synth_encoded(result.text, fmt)
+        name = f"{uuid.uuid4().hex}.{fmt}"
+        self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
+        url = self._audio_srv.url_for(name)
+        self._trace.emit("tts", f"serving reply ({len(data)} B {fmt}) at {url}", direction="out")
         self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
         self.last_activity = "klaar"
 

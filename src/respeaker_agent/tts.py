@@ -44,6 +44,13 @@ class TTSClient(ABC):
         chunks = [c async for c in self.synth_stream(text)]
         return b"".join(chunks)
 
+    @abstractmethod
+    async def synth_encoded(self, text: str, fmt: str) -> bytes:
+        """Return the reply as a complete encoded audio FILE (flac/mp3/wav/opus) —
+        for serving at a URL the device fetches. No client-side resampling; the
+        device's media pipeline handles it."""
+        ...
+
 
 class VoxtralTTS(TTSClient):
     """Mistral Voxtral speech API. POST {base}/audio/speech.
@@ -83,6 +90,16 @@ class VoxtralTTS(TTSClient):
             self._trace.emit("error", f"TTS request failed: {_safe(err)}", level="error")
             raise
 
+    async def synth_encoded(self, text: str, fmt: str) -> bytes:
+        url = f"{self._s.tts_base_url.rstrip('/')}/audio/speech"
+        body = {"model": self._s.tts_model, "input": text, "voice_id": self._s.tts_voice_id or None, "response_format": fmt}
+        headers = {"Authorization": f"Bearer {self._key}", "Accept": "application/json"}
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
+            resp = await cli.post(url, json=body, headers=headers)
+            resp.raise_for_status()
+            b64 = resp.json().get("audio_data") or ""
+        return base64.b64decode(b64)
+
 
 class OpenAITTS(TTSClient):
     """Generic OpenAI-compatible /audio/speech. Returns a binary audio body
@@ -115,6 +132,15 @@ class OpenAITTS(TTSClient):
         out = audio.resample_int16(samples, rate, self._s.tts_out_rate)
         if out.size:
             yield out.tobytes()
+
+    async def synth_encoded(self, text: str, fmt: str) -> bytes:
+        url = f"{self._s.tts_base_url.rstrip('/')}/audio/speech"
+        body = {"model": self._s.tts_model, "input": text, "voice": self._s.tts_voice_id or "alloy", "response_format": fmt}
+        headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
+            resp = await cli.post(url, json=body, headers=headers)
+            resp.raise_for_status()
+            return resp.content
 
 
 async def _iter_b64_pcm(resp: httpx.Response) -> AsyncIterator[bytes]:

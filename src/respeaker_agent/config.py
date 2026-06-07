@@ -107,9 +107,11 @@ class Settings:
     vad_silence_ms: int = 800
     vad_max_ms: int = 12000
     vad_prespeech_ms: int = 7000
-    # TTS playback: this firmware fetches a URL, so we serve the reply WAV on the LAN.
-    # Audio-only server, bound to the LAN so the device can reach it (random tokens).
+    # TTS playback: this firmware fetches a URL and decodes by type — its pipeline is
+    # FLAC (it rejects WAV: "Could not determine audio file type"). We ask the engine
+    # for this format and serve it on the LAN audio server (random tokens).
     tts_audio_port: int = 8731
+    tts_voice_format: str = "flac"  # device-playback format (flac|mp3|wav|opus)
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

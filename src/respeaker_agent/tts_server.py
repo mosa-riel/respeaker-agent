@@ -25,23 +25,24 @@ class TTSAudioServer:
     def __init__(self, port: int, max_clips: int = 8) -> None:
         self._port = port
         self._max = max_clips
-        self._clips: "OrderedDict[str, bytes]" = OrderedDict()
+        # filename ("<token>.<ext>") -> (bytes, content_type)
+        self._clips: "OrderedDict[str, tuple[bytes, str]]" = OrderedDict()
         self._lock = threading.Lock()
         self._httpd: ThreadingHTTPServer | None = None
         self.lan_ip = "127.0.0.1"
 
-    def publish(self, token: str, wav: bytes) -> None:
+    def publish(self, name: str, data: bytes, content_type: str) -> None:
         with self._lock:
-            self._clips[token] = wav
+            self._clips[name] = (data, content_type)
             while len(self._clips) > self._max:
                 self._clips.popitem(last=False)
 
-    def _get(self, token: str) -> bytes | None:
+    def _get(self, name: str) -> tuple[bytes, str] | None:
         with self._lock:
-            return self._clips.get(token)
+            return self._clips.get(name)
 
-    def url_for(self, token: str) -> str:
-        return f"http://{self.lan_ip}:{self._port}/{token}.wav"
+    def url_for(self, name: str) -> str:
+        return f"http://{self.lan_ip}:{self._port}/{name}"
 
     def start(self, device_host: str) -> None:
         self.lan_ip = _detect_lan_ip(device_host)
@@ -52,16 +53,13 @@ class TTSAudioServer:
                 pass
 
             def do_GET(self):  # noqa: N802
-                path = self.path.lstrip("/")
-                if not path.endswith(".wav"):
+                clip = server._get(self.path.lstrip("/"))
+                if clip is None:
                     self.send_error(404)
                     return
-                data = server._get(path[:-4])
-                if data is None:
-                    self.send_error(404)
-                    return
+                data, content_type = clip
                 self.send_response(200)
-                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
