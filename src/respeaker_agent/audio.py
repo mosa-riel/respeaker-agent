@@ -53,6 +53,25 @@ def wav_to_int16_mono(data: bytes) -> tuple[np.ndarray, int]:
     return arr, rate
 
 
+def make_chime_flac(rate: int = 24000) -> bytes:
+    """A short two-note 'bling' as FLAC bytes — played when a follow-up session ends
+    (the device only decodes FLAC/MP3/Opus, not WAV)."""
+    import soundfile as sf
+
+    def tone(freq: float, dur: float) -> np.ndarray:
+        t = np.linspace(0, dur, int(rate * dur), endpoint=False)
+        return np.sin(2 * np.pi * freq * t)
+
+    sig = np.concatenate([tone(784, 0.12), tone(1175, 0.16)])  # G5 → D6
+    fade = int(rate * 0.03)
+    env = np.ones(sig.shape[0])
+    env[-fade:] = np.linspace(1, 0, fade)
+    sig = (sig * env * 0.35).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, sig, rate, format="FLAC")
+    return buf.getvalue()
+
+
 def flac_duration_seconds(data: bytes) -> float | None:
     """Read clip length from a FLAC STREAMINFO header — no decode, so it's cheap and
     can't delay the response. Returns None if it can't parse."""

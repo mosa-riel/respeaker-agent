@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.26",
     "soxr>=0.5",
     "mcp>=1.27.2",
+    "soundfile>=0.14.0",
 ]
 
 [project.scripts]

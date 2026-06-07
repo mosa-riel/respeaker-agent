@@ -99,11 +99,12 @@ class Settings:
     # only one client may own voice, and Home Assistant owns it while the device is
     # adopted there. Stop HA's pipeline for this device before enabling.
     voice_enabled: bool = False
-    # Follow-up conversation: after the reply, re-open the mic without a new wake word.
-    # Uses the announce API (plays the reply, awaits real playback end, then
-    # start_conversation re-listens) — also fixes tail-clipping/duration guessing.
-    # OFF by default: it changes the working TTS path; verify on hardware.
-    voice_followup: bool = False
+    # Follow-up conversation: after the reply, re-open the mic without a new wake word
+    # (announce API: plays the reply, awaits real playback end, then start_conversation
+    # re-listens). Verified on the reSpeaker. The session ends when you stay silent
+    # (~vad_prespeech_ms) — an end chime then signals it's closed.
+    voice_followup: bool = True
+    voice_end_chime: bool = True  # play a short chime when a follow-up session ends
     device_volume: float = 1.0  # set on the reSpeaker media player at connect (0–1)
     # Server-side end-of-speech detection (this firmware streams continuously and
     # expects the server to decide when the user stopped). Energy-based VAD on the

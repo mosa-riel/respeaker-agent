@@ -70,6 +70,8 @@ class VoicePipeline:
         self._speech = False
         self._silence_ms = 0.0
         self._heard_ms = 0.0
+        self._conversing = False  # in an active follow-up session
+        self._chime_url: str | None = None
         self.attached = False  # subscribed as the device's voice handler
         self.last_activity: str = ""  # last pipeline stage, for the UI
 
@@ -114,7 +116,9 @@ class VoicePipeline:
         self._silence_ms = 0.0
         self._heard_ms = 0.0
         self.last_activity = "luistert…"
-        self._trace.emit("wake", wake_word_phrase or "(wake word)", data={"conversation_id": self._conv_id, "flags": flags})
+        if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
+            self._conversing = False
+        self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         # Enter the listening phase NOW (drives the device's listening LEDs) — the
         # transcript comes later in STT_END. (Sending STT_START after speech ended
@@ -172,16 +176,23 @@ class VoicePipeline:
         asyncio.create_task(self._finish(audio, spoke))
 
     async def _finish(self, audio: bytes, spoke: bool) -> None:
+        replied = False
         try:
             if spoke and audio:
-                await self._handle_turn(audio)
+                replied = await self._handle_turn(audio)
             else:
                 self._trace.emit("info", "voice: no speech captured")
         except Exception as err:  # noqa: BLE001 - never leave the device hanging
             self._trace.emit("error", f"voice turn failed: {err}", level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
         finally:
+            # A follow-up session that ends without a reply (silence) → close it + chime.
+            ended_session = self._s.voice_followup and self._conversing and not replied
             self._run_end()
+            if ended_session and self._s.voice_end_chime:
+                await self._play_chime()
+            if ended_session:
+                self._conversing = False
             self._reset()
 
     def _reset(self) -> None:
@@ -194,14 +205,16 @@ class VoicePipeline:
 
     # ── the turn ────────────────────────────────────────────────────────────────
 
-    async def _handle_turn(self, audio: bytes) -> None:
+    async def _handle_turn(self, audio: bytes) -> bool:
+        """Run STT → agent → TTS. Returns True if it produced a spoken reply
+        (in follow-up mode that also means the mic was re-opened)."""
         self.last_activity = "transcriberen…"
         self._event(_EVT.VOICE_ASSISTANT_STT_START)
         text = await self._stt.transcribe(audio, in_rate=DEVICE_MIC_RATE)
         self._event(_EVT.VOICE_ASSISTANT_STT_END, {"text": text})
         if not text:
             self.last_activity = "niets verstaan"
-            return
+            return False
 
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
@@ -209,7 +222,7 @@ class VoicePipeline:
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
         if not result.text:
-            return
+            return False
 
         self.last_activity = "praten…"
         assert self._cli is not None
@@ -237,6 +250,7 @@ class VoicePipeline:
                 await self._cli.send_voice_assistant_announcement_await_response(
                     media_id=url, timeout=min((secs or 6) + 25, 120.0),
                     text=result.text, start_conversation=True)
+                self._conversing = True  # mic re-opened → in a session
             except Exception as err:  # noqa: BLE001
                 self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
         else:
@@ -247,6 +261,25 @@ class VoicePipeline:
             if secs:
                 await asyncio.sleep(min(secs + 1.6, 40.0))
         self.last_activity = "klaar"
+        return True
+
+    async def _play_chime(self) -> None:
+        """Play the end-of-session chime so the user knows the mic closed."""
+        if self._chime_url is None:
+            try:
+                from .audio import make_chime_flac
+                self._audio_srv.publish("chime.flac", make_chime_flac(), "audio/flac")
+                self._chime_url = self._audio_srv.url_for("chime.flac")
+            except Exception as err:  # noqa: BLE001
+                self._trace.emit("info", f"chime unavailable: {str(err)[:80]}")
+                self._chime_url = ""
+        if not self._chime_url or self._cli is None:
+            return
+        try:
+            await self._cli.send_voice_assistant_announcement_await_response(
+                media_id=self._chime_url, timeout=8.0, start_conversation=False)
+        except Exception as err:  # noqa: BLE001
+            self._trace.emit("info", f"chime failed: {str(err)[:80]}")
 
     def _run_end(self) -> None:
         """Send RUN_END at most once per turn (the announce/follow-up path ends the
