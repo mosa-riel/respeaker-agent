@@ -54,19 +54,27 @@ def wav_to_int16_mono(data: bytes) -> tuple[np.ndarray, int]:
 
 
 def make_chime_flac(rate: int = 24000) -> bytes:
-    """A short two-note 'bling' as FLAC bytes — played when a follow-up session ends
-    (the device only decodes FLAC/MP3/Opus, not WAV)."""
+    """A low, descending 'da-duuh' as FLAC bytes — played when a follow-up session
+    closes (the device only decodes FLAC/MP3/Opus, not WAV). Descending + low = a
+    clear 'we're done' feel."""
     import soundfile as sf
 
     def tone(freq: float, dur: float) -> np.ndarray:
         t = np.linspace(0, dur, int(rate * dur), endpoint=False)
-        return np.sin(2 * np.pi * freq * t)
+        sig = np.sin(2 * np.pi * freq * t)
+        # gentle attack + release per note so it doesn't click
+        a = int(rate * 0.008)
+        env = np.ones(sig.shape[0])
+        env[:a] = np.linspace(0, 1, a)
+        env[-a:] = np.linspace(1, 0, a)
+        return sig * env
 
-    sig = np.concatenate([tone(784, 0.12), tone(1175, 0.16)])  # G5 → D6
-    fade = int(rate * 0.03)
+    # "da" (short, G3) → "duuh" (longer, lower C3) — descending, closing
+    sig = np.concatenate([tone(196.0, 0.12), tone(130.81, 0.34)])
+    fade = int(rate * 0.05)
     env = np.ones(sig.shape[0])
     env[-fade:] = np.linspace(1, 0, fade)
-    sig = (sig * env * 0.35).astype(np.float32)
+    sig = (sig * env * 0.4).astype(np.float32)
     buf = io.BytesIO()
     sf.write(buf, sig, rate, format="FLAC")
     return buf.getvalue()

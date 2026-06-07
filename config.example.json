@@ -35,6 +35,13 @@
       "args": ["run", "python", "scripts/funbox_mcp.py"],
       "url": "",
       "enabled": true
+    },
+    {
+      "name": "websearch",
+      "command": "uv",
+      "args": ["run", "python", "scripts/websearch_mcp.py"],
+      "url": "",
+      "enabled": true
     }
   ]
 }
