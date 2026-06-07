@@ -47,7 +47,7 @@ agent service (Python, asyncio)
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Device link + web UI + live trace monitor | ✅ done (step 01) |
-| 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | in progress (TTS + audio + config done) |
+| 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | ✅ working on hardware (server-VAD, FLAC-URL TTS, follow-up + chime, flow-graph UI, multi-MCP) — see steps 02–08 |
 | 3 | `show_screen` tool → render (Pillow) + push to reTerminal e-paper | |
 | 4 | MCP client layer + multi-server config UI; tool dispatch | (overlaps p2) |
 | 5 | Package as HA add-on (Docker); deploy on the HA host | |
