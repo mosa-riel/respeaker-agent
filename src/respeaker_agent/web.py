@@ -170,7 +170,7 @@ async def put_config(payload: dict) -> JSONResponse:
     # bind like web_host). tts_provider is validated against a fixed set below.
     str_fields = {
         "device_host", "llm_base_url", "llm_model", "system_prompt",
-        "stt_base_url", "stt_model",
+        "stt_base_url", "stt_model", "stt_language",
         "tts_provider", "tts_base_url", "tts_model", "tts_voice_id", "tts_format",
     }
     for key in str_fields & payload.keys():
@@ -184,7 +184,12 @@ async def put_config(payload: dict) -> JSONResponse:
         "device_port": (1, 65535),
         "tts_pcm_rate": (8000, 48000),
         "tts_out_rate": (8000, 48000),
+        "tts_audio_port": (1, 65535),
         "max_tool_rounds": (1, 20),
+        "vad_threshold": (0, 20000),
+        "vad_silence_ms": (100, 5000),
+        "vad_max_ms": (2000, 60000),
+        "vad_prespeech_ms": (1000, 30000),
     }
     for key, (lo, hi) in int_fields.items():
         if key not in payload:
@@ -196,7 +201,18 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    for key in {"voice_enabled", "voice_followup"} & payload.keys():
+    float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0)}
+    for key, (lo, hi) in float_fields.items():
+        if key not in payload:
+            continue
+        try:
+            num = float(payload[key])
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": f"{key} must be a number"}, status_code=422)
+        if not (lo <= num <= hi):
+            return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
+        setattr(settings, key, num)
+    for key in {"voice_enabled", "voice_followup", "voice_end_chime"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
     # Don't let a scalar-settings save clobber mcp_servers edited in config.json
     # (stdio servers are added there; they only take effect on restart anyway).

@@ -32,7 +32,23 @@
 			<div class="flowmap" id="flowmap">
 				<svg class="wires" id="wires" aria-hidden="true"></svg>
 			</div>
+			<p class="muted flowmap-hint">tip: klik een stap aan om z'n instellingen te openen</p>
 		</section>
+
+		<!-- Per-stage settings modal (opened by clicking a pipeline node) -->
+		<div class="modal-overlay" id="node-modal" hidden onclick="if(event.target===this)closeNode()">
+			<div class="modal">
+				<div class="modal-head">
+					<h3 class="modal-title" id="modal-title"></h3>
+					<button class="modal-x" onclick="closeNode()" aria-label="close">×</button>
+				</div>
+				<div class="modal-body" id="modal-body"></div>
+				<div class="modal-foot">
+					<span class="muted" id="modal-note"></span>
+					<button class="btn-primary" id="modal-save" onclick="saveNode()">Save</button>
+				</div>
+			</div>
+		</div>
 
 		<!-- Device status -->
 		<section class="card">
@@ -383,6 +399,8 @@
 				el.className = `fn fn-${n.shape}` + (n.detached ? ' fn-detached' : '');
 				el.id = 'fn-' + n.id;
 				el.style.left = n.x + '%'; el.style.top = n.y + '%';
+				el.title = 'instellingen';
+				el.addEventListener('click', () => openNode(n.id));
 				el.innerHTML = `<div class="fn-icon">${n.icon}</div><div class="fn-label">${n.label}</div>` +
 					(n.eq ? '<div class="fn-eq"><i></i><i></i><i></i><i></i><i></i></div>'
 						: `<div class="fn-sub" id="fn-sub-${n.id}"></div>`);
@@ -470,6 +488,94 @@
 			glow(lit, e.level === 'error', ms || undefined);
 			lastNode = lit;
 		}
+
+		/* ── per-stage settings modal ── */
+		const NODE_FORMS = {
+			wake: {
+				title: '🎙️ Wake / device', note: 'restart om verbinding toe te passen', fields: [
+					{ k: 'voice_enabled', t: 'bool', label: 'Voice ingeschakeld' },
+					{ k: 'device_host', label: 'Device host' },
+					{ k: 'device_port', t: 'int', label: 'Device poort' },
+				]
+			},
+			stt: {
+				title: '🗣️ Spraak → tekst', fields: [
+					{ k: 'stt_base_url', label: 'STT base URL' },
+					{ k: 'stt_model', label: 'STT model' },
+					{ k: 'stt_language', label: 'Taal (bv. nl)' },
+				]
+			},
+			llm: {
+				title: '🧠 LLM / agent', fields: [
+					{ k: 'llm_base_url', label: 'LLM base URL' },
+					{ k: 'llm_model', label: 'LLM model' },
+					{ k: 'llm_temperature', t: 'float', label: 'Temperatuur (0–2)' },
+					{ k: 'max_tool_rounds', t: 'int', label: 'Max tool-rondes' },
+					{ k: 'system_prompt', t: 'textarea', label: 'System prompt' },
+				]
+			},
+			tool: { title: '🔧 Tools (MCP)', mcp: true },
+			tts: {
+				title: '🔊 Tekst → spraak', fields: [
+					{ k: 'tts_provider', label: 'Provider (voxtral|openai)' },
+					{ k: 'tts_base_url', label: 'TTS base URL' },
+					{ k: 'tts_model', label: 'TTS model' },
+					{ k: 'tts_voice_id', label: 'Voice id' },
+					{ k: 'tts_format', label: 'Engine-formaat (flac|pcm|wav)' },
+					{ k: 'tts_out_rate', t: 'int', label: 'Output rate (Hz)' },
+					{ k: 'voice_followup', t: 'bool', label: 'Follow-up gesprek' },
+					{ k: 'voice_end_chime', t: 'bool', label: 'Eind-chime' },
+				]
+			},
+			device: {
+				title: '📡 Device / opname', fields: [
+					{ k: 'device_volume', t: 'float', label: 'Volume (0–1)' },
+					{ k: 'vad_threshold', t: 'int', label: 'VAD drempel' },
+					{ k: 'vad_silence_ms', t: 'int', label: 'Stilte = einde (ms)' },
+					{ k: 'vad_max_ms', t: 'int', label: 'Max opname (ms)' },
+					{ k: 'vad_prespeech_ms', t: 'int', label: 'Geen-spraak timeout (ms)' },
+				]
+			},
+		};
+		let modalNode = null;
+		async function openNode(id) {
+			const form = NODE_FORMS[id]; if (!form) return;
+			modalNode = id;
+			$('modal-title').textContent = form.title;
+			$('modal-note').textContent = form.note || '';
+			const body = $('modal-body');
+			if (form.mcp) {
+				body.innerHTML = '<p class="muted">Tools komen van de MCP-servers. Beheer + in/uitschakelen per tool in de “MCP servers”-kaart hieronder.</p>';
+				$('modal-save').style.display = 'none';
+			} else {
+				$('modal-save').style.display = '';
+				const c = await (await fetch('/api/config')).json();
+				body.innerHTML = form.fields.map(f => {
+					const v = c[f.k] ?? '';
+					if (f.t === 'bool') return `<label class="modal-check"><input type="checkbox" data-k="${f.k}" data-t="bool" ${v ? 'checked' : ''}/> ${f.label}</label>`;
+					if (f.t === 'textarea') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" rows="4">${esc(String(v))}</textarea></div>`;
+					const it = (f.t === 'int' || f.t === 'float') ? 'number' : 'text';
+					const step = f.t === 'float' ? ' step="0.05"' : '';
+					return `<div class="field"><label class="field-label">${f.label}</label><input class="field-input" data-k="${f.k}" data-t="${f.t || 'str'}" type="${it}"${step} value="${esc(String(v))}"/></div>`;
+				}).join('');
+			}
+			$('node-modal').hidden = false;
+		}
+		function closeNode() { $('node-modal').hidden = true; modalNode = null; }
+		async function saveNode() {
+			const out = {};
+			$('modal-body').querySelectorAll('[data-k]').forEach(el => {
+				const k = el.dataset.k, t = el.dataset.t;
+				if (t === 'bool') out[k] = el.checked;
+				else if (t === 'int') out[k] = parseInt(el.value, 10);
+				else if (t === 'float') out[k] = parseFloat(el.value);
+				else out[k] = el.value;
+			});
+			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) })).json();
+			$('modal-note').textContent = r.ok === false ? ('Fout: ' + r.error) : (r.note || 'Opgeslagen.');
+			if (r.ok !== false) { loadConfig(); setTimeout(closeNode, 800); }
+		}
+		document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNode(); });
 
 		function clearPipeline() {
 			PIPE.forEach(n => {
