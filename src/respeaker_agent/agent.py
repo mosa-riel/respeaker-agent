@@ -18,7 +18,8 @@ Every stage emits to the TraceBus: `llm-req`, `llm-rsp`, `tool` (action + result
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -35,6 +36,7 @@ class AgentResult:
     text: str
     rounds: int
     tool_calls: list[dict[str, Any]]  # {name, args, result} per executed call
+    messages: list[dict[str, Any]] = field(default_factory=list)  # history to persist (no system)
 
 
 class AgentLoop:
@@ -44,29 +46,38 @@ class AgentLoop:
         self._trace = trace
         self._tools = tools
 
-    async def run(self, user_text: str, *, force_tool: bool = False, context: str | None = None) -> AgentResult:
-        # `context` = live home overview (areas/devices/state) injected from the HA
-        # MCP server per-conversation. Kept out of the static prompt so it never
-        # goes stale. Phase 4 fills it in; None until then.
+    async def run(
+        self,
+        user_text: str,
+        *,
+        history: list[dict[str, Any]] | None = None,
+        force_tool: bool = False,
+        context: str | None = None,
+    ) -> AgentResult:
+        # `history` = prior turns (user/assistant/tool messages, NO system) so
+        # follow-ups like "ja" / "doe maar" keep context. `context` = live home
+        # overview injected fresh each turn so it never goes stale (phase 4).
         system = self._s.system_prompt
         if context:
             system = f"{system}\n\nActuele context van dit huis:\n{context}"
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
-        ]
+        convo: list[dict[str, Any]] = list(history or [])  # everything after system
+        convo.append({"role": "user", "content": user_text})
         specs = self._tools.specs()
         executed: list[dict[str, Any]] = []
 
+        def _result(text: str, rounds: int) -> AgentResult:
+            convo.append({"role": "assistant", "content": text})
+            return AgentResult(text=text, rounds=rounds, tool_calls=executed, messages=convo)
+
         async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
             for round_i in range(1, self._s.max_tool_rounds + 1):
-                msg = await self._chat(cli, messages, specs, force_tool and round_i == 1)
+                msg = await self._chat(cli, [{"role": "system", "content": system}] + convo, specs, force_tool and round_i == 1)
                 tool_calls = msg.get("tool_calls") or []
                 if not tool_calls:
-                    return AgentResult(text=(msg.get("content") or "").strip(), rounds=round_i, tool_calls=executed)
+                    return _result((msg.get("content") or "").strip(), round_i)
 
                 # Keep the assistant turn (with its tool_calls) in the history.
-                messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+                convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
 
                 # Execute EVERY requested call (there can be more than one).
                 for tc in tool_calls:
@@ -77,15 +88,15 @@ class AgentLoop:
                     result = await self._tools.dispatch(name, args)
                     self._trace.emit("tool", f"← {name}: {_compact(result)}", direction="in", data={"name": name, "result": result})
                     executed.append({"name": name, "args": args, "result": result})
-                    messages.append({
+                    convo.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", ""),
                         "content": json.dumps(result, ensure_ascii=False, default=str),
                     })
 
             # Ran out of rounds — one closing answer without tools.
-            final = await self._chat(cli, messages, None, False)
-            return AgentResult(text=(final.get("content") or "").strip(), rounds=self._s.max_tool_rounds, tool_calls=executed)
+            final = await self._chat(cli, [{"role": "system", "content": system}] + convo, None, False)
+            return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
 
     async def _chat(self, cli: httpx.AsyncClient, messages: list[dict[str, Any]], specs: list[dict] | None, force: bool) -> dict[str, Any]:
         body: dict[str, Any] = {"model": self._s.llm_model, "messages": messages}
@@ -107,6 +118,44 @@ class AgentLoop:
         self._trace.emit("llm-rsp", (msg.get("content") or "").strip() or "(tool call)", direction="in",
                          data={"finish": data["choices"][0].get("finish_reason"), "tool_calls": msg.get("tool_calls")})
         return msg
+
+
+class ConversationStore:
+    """In-memory chat history per conversation id. Bounded + TTL'd, so the agent
+    "sort of" remembers — recent turns carry context (follow-ups like "ja"), old
+    conversations expire. History excludes the system prompt; trimming keeps clean
+    user-turn boundaries so tool_call/tool message pairs are never split."""
+
+    def __init__(self, ttl: float = 600.0, max_messages: int = 24) -> None:
+        self._ttl = ttl
+        self._max = max_messages
+        self._store: dict[str, dict[str, Any]] = {}
+
+    def get(self, conv_id: str) -> list[dict[str, Any]]:
+        ent = self._store.get(conv_id)
+        if not ent or (time.time() - ent["ts"]) > self._ttl:
+            self._store.pop(conv_id, None)
+            return []
+        return ent["messages"]
+
+    def update(self, conv_id: str, messages: list[dict[str, Any]]) -> None:
+        self._store[conv_id] = {"messages": _trim(messages, self._max), "ts": time.time()}
+
+    def clear(self, conv_id: str) -> None:
+        self._store.pop(conv_id, None)
+
+
+def _trim(msgs: list[dict[str, Any]], max_messages: int) -> list[dict[str, Any]]:
+    """Keep the tail, but start at a user-turn boundary so an assistant's
+    tool_calls always stay paired with their tool replies."""
+    if len(msgs) <= max_messages:
+        return msgs
+    for i, m in enumerate(msgs):
+        if m.get("role") == "user" and (len(msgs) - i) <= max_messages:
+            return msgs[i:]
+    # fallback: last user boundary
+    user_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "user"]
+    return msgs[user_idxs[-1]:] if user_idxs else msgs[-max_messages:]
 
 
 def _parse_args(raw: Any) -> dict[str, Any]:

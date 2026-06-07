@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import audio
-from .agent import AgentLoop
+from .agent import AgentLoop, ConversationStore
 from .config import McpServer, Secrets, Settings
 from .device import DeviceLink
 from .mcp_client import McpManager
@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     app.state.link = link
     app.state.tools = tools
     app.state.agent = AgentLoop(settings, secrets, trace, tools)
+    app.state.convos = ConversationStore()
     app.state.stt = STTClient(settings, secrets, trace)
     app.state.tts = make_tts(settings, secrets, trace)
     mcp = McpManager(settings, trace, tools)
@@ -177,10 +178,17 @@ async def run_agent(payload: dict) -> JSONResponse:
     if not text:
         return JSONResponse({"ok": False, "error": "text is required"}, status_code=422)
     settings: Settings = app.state.settings
+    convos: ConversationStore = app.state.convos
+    conv_id = str(payload.get("conversation_id") or "default")
+    if payload.get("reset"):
+        convos.clear(conv_id)
     try:
-        result = await app.state.agent.run(text, force_tool=bool(payload.get("force_tool")))
+        result = await app.state.agent.run(
+            text, history=convos.get(conv_id), force_tool=bool(payload.get("force_tool"))
+        )
     except Exception as err:  # noqa: BLE001 - surface to UI, already traced
         return JSONResponse({"ok": False, "error": _safe(err)}, status_code=502)
+    convos.update(conv_id, result.messages)  # persist the turn for follow-ups
     out: dict = {"ok": True, "reply": result.text, "rounds": result.rounds, "tool_calls": result.tool_calls}
     if payload.get("speak") and result.text:
         try:

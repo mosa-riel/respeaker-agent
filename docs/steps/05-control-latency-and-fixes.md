@@ -56,6 +56,16 @@ use the UI (`/api/mcp`). The server is the source of truth at runtime.
   "keukenkopjes aan" — all 1.6–2.5 s, all fired `call_service`, correct Dutch.
 - `enabled_tools` save round-trip stable; SSE subscription survives timeouts.
 
+## Update — conversation memory
+
+Each `/api/run` was stateless, so follow-ups broke ("ja" after "wil je 'm uitdoen?"
+→ the agent greeted). Added `ConversationStore` (in-memory, per `conversation_id`,
+TTL 600s, capped to ~24 messages at clean user-turn boundaries so tool_call/tool
+pairs never split). `AgentLoop.run(history=)` threads prior turns; `/api/run` takes
+`conversation_id` + `reset`; the chat UI uses one id + a "New chat" button.
+Verified: "Hoeveel lampen in de keuken?" → "en in de woonkamer?" → "zet die laatste
+aan" all keep context. Voice (#5) will use a per-wake-session id.
+
 ## Open / next
 
 - Task #8 — inject cached home context (entities) → skip the search round, fix the

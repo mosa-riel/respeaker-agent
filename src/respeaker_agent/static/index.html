@@ -54,8 +54,11 @@
 				<div class="section-icon">💬</div>
 				<div><div class="section-title">Test chat</div>
 					<div class="section-desc">type a prompt → agent loop (LLM + tools) → reply. HA control arrives with MCP (phase 4).</div></div>
-				<label class="muted" style="margin-left:auto;display:flex;align-items:center;gap:5px">
-					<input type="checkbox" id="chat-speak" /> speak</label>
+				<div class="row-between" style="margin-left:auto;gap:10px">
+					<label class="muted" style="display:flex;align-items:center;gap:5px">
+						<input type="checkbox" id="chat-speak" /> speak</label>
+					<button class="btn-ghost" onclick="newChat()">New chat</button>
+				</div>
 			</div>
 			<div class="card-body">
 				<div class="chat-log" id="chat-log"></div>
@@ -230,6 +233,9 @@
 			chatLog.scrollTop = chatLog.scrollHeight;
 			return el;
 		}
+		const CHAT_ID = 'ui';
+		let chatReset = false;
+		function newChat() { $('chat-log').innerHTML = ''; chatReset = true; $('chat-input').focus(); }
 		async function sendChat(text) {
 			addMsg('user', text);
 			const pending = addMsg('assistant', '…');
@@ -238,8 +244,9 @@
 			try {
 				const r = await (await fetch('/api/run', {
 					method: 'POST', headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ text, speak: $('chat-speak').checked }),
+					body: JSON.stringify({ text, speak: $('chat-speak').checked, conversation_id: CHAT_ID, reset: chatReset }),
 				})).json();
+				chatReset = false;
 				if (!r.ok) { bub.textContent = 'Error: ' + (r.error || 'failed'); return; }
 				bub.textContent = r.reply || '(geen antwoord)';
 				if (r.tool_calls && r.tool_calls.length) {
