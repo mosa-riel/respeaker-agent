@@ -24,6 +24,7 @@
 				<div class="section-icon">🛰️</div>
 				<div><div class="section-title">Voice pipeline</div>
 					<div class="section-desc">lights up live as each stage runs</div></div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="clearPipeline()">Clear</button>
 			</div>
 			<div class="card-body"><div class="pipeline" id="pipeline"></div></div>
 		</section>
@@ -371,9 +372,19 @@
 			node.classList.remove('error'); node.classList.add('active');
 			if (e.level === 'error') node.classList.add('error');
 			const sub = $('pl-sub-' + id);
-			if (sub && e.text) sub.textContent = e.text.length > 28 ? e.text.slice(0, 27) + '…' : e.text;
+			if (sub && e.text) sub.textContent = e.text.length > 120 ? e.text.slice(0, 119) + '…' : e.text;
 			clearTimeout(nodeTimers[id]);
 			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), 2200);
+		}
+
+		function clearPipeline() {
+			PIPE.forEach(n => {
+				const node = $('pl-' + n.id);
+				if (node) node.classList.remove('active', 'error');
+				const sub = $('pl-sub-' + n.id);
+				if (sub) sub.textContent = '';
+				clearTimeout(nodeTimers[n.id]);
+			});
 		}
 
 		buildPipeline();

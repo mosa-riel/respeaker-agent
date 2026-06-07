@@ -230,7 +230,7 @@ h1, h2, h3, h4 {
 .pl-node { flex: 1 1 0; min-width: 90px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; border-radius: var(--radius-lg); background: var(--color-gray-50); border: 1px solid var(--color-gray-200); transition: transform .25s, background .25s, border-color .25s; text-align: center; }
 .pl-icon { font-size: 1.5rem; opacity: .55; filter: grayscale(.5); transition: all .25s; }
 .pl-label { font-family: var(--font-heading); font-weight: 600; font-size: .8125rem; color: var(--color-gray-600); }
-.pl-sub { font-size: .625rem; color: var(--color-gray-400); min-height: .82rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-sub { font-size: .6875rem; color: var(--color-gray-500); min-height: .82rem; max-width: 100%; line-height: 1.35; white-space: normal; word-break: break-word; }
 .pl-arrow { display: flex; align-items: center; color: var(--color-gray-300); font-size: 1.1rem; }
 .pl-node.active { background: var(--color-brand-subtle); border-color: var(--color-brand); transform: translateY(-2px); animation: plpulse 1s ease-in-out infinite; }
 .pl-node.active .pl-icon { opacity: 1; filter: none; transform: scale(1.18); }
