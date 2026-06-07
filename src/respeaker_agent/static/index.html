@@ -23,7 +23,11 @@
 			<div class="flowmap-head">
 				<span class="flowmap-live">live</span>
 				<h2 class="flowmap-title">Voice pipeline</h2>
-				<button class="btn-ghost flowmap-clear" onclick="clearPipeline()">Clear</button>
+				<div class="flowmap-actions">
+					<label class="fm-toggle" title="re-open the mic after a reply (no wake word)">
+						<input type="checkbox" id="followup-tg" onchange="toggleFollowup(this.checked)" /> follow-up</label>
+					<button class="btn-ghost" onclick="clearPipeline()">Clear</button>
+				</div>
 			</div>
 			<div class="flowmap" id="flowmap">
 				<svg class="wires" id="wires" aria-hidden="true"></svg>
@@ -231,6 +235,10 @@
 		async function loadConfig() {
 			const c = await (await fetch('/api/config')).json();
 			for (const k of [...CFG_STR, ...CFG_NUM]) if ($(k)) $(k).value = c[k] ?? '';
+			if ($('followup-tg')) $('followup-tg').checked = !!c.voice_followup;
+		}
+		async function toggleFollowup(on) {
+			await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_followup: on }) });
 		}
 		async function saveConfig() {
 			const body = {};

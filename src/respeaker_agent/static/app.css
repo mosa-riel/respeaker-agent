@@ -233,6 +233,9 @@ h1, h2, h3, h4 {
 @keyframes livedot { 0% { box-shadow: 0 0 0 0 rgba(0,110,210,.5); } 70%,100% { box-shadow: 0 0 0 9px rgba(0,110,210,0); } }
 .flowmap-title { font-family: var(--font-heading); font-size: 1.0625rem; font-weight: 700; letter-spacing: -.02em; margin: 0; color: var(--color-gray-900); }
 .flowmap-clear { margin-left: auto; }
+.flowmap-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.fm-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: .75rem; font-weight: 600; color: var(--color-gray-600); cursor: pointer; }
+.fm-toggle input { accent-color: var(--color-brand); }
 
 .flowmap {
 	position: relative;
