@@ -1,0 +1,17 @@
+{
+  "device_host": "respeaker-xvf3800-assistant.local",
+  "device_port": 6053,
+  "llm_base_url": "https://api.mistral.ai/v1",
+  "llm_model": "mistral-medium-latest",
+  "web_host": "127.0.0.1",
+  "web_port": 8730,
+  "mcp_servers": [
+    {
+      "name": "home-assistant",
+      "command": "uvx",
+      "args": ["ha-mcp@latest"],
+      "url": "",
+      "enabled": true
+    }
+  ]
+}

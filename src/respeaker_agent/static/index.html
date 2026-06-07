@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>reSpeaker Agent</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+	<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+	<header class="app-header">
+		<span class="app-brand text-gradient">reSpeaker Agent</span>
+		<span id="conn" class="status-pill"><span class="dot"></span> connecting…</span>
+		<span id="stream-pill" class="status-pill" style="margin-left:auto"><span class="dot"></span> live</span>
+	</header>
+
+	<main class="app-main">
+		<!-- Device status -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🎙️</div>
+				<div>
+					<div class="section-title">Device</div>
+					<div class="section-desc">reSpeaker XVF3800 — ESPHome native API</div>
+				</div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="refresh()">↻ Refresh</button>
+			</div>
+			<div class="card-body"><div id="device-rows"></div></div>
+		</section>
+
+		<!-- Live pipeline monitor -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">📡</div>
+				<div><div class="section-title">Live pipeline monitor</div>
+					<div class="section-desc">prompts, transcripts, tool calls, responses &amp; errors — newest first</div></div>
+				<div class="row-between" style="margin-left:auto; gap:8px">
+					<label class="muted" style="display:flex;align-items:center;gap:5px">
+						<input type="checkbox" id="paused" /> pause</label>
+					<button class="btn-ghost" onclick="clearMon()">Clear</button>
+				</div>
+			</div>
+			<div class="card-body">
+				<div class="trace-filters" id="filters"></div>
+				<div class="trace-list" id="monitor"></div>
+			</div>
+		</section>
+
+		<!-- Config -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">⚙️</div>
+				<div><div class="section-title">Configuration</div>
+					<div class="section-desc">non-secret settings · API keys live in .env</div></div>
+				<button class="btn-primary" style="margin-left:auto" onclick="saveConfig()">Save</button>
+			</div>
+			<div class="card-body">
+				<div class="field-stack">
+					<div class="grid-2">
+						<div class="field"><label class="field-label">Device host</label>
+							<input class="field-input" id="device_host" /></div>
+						<div class="field"><label class="field-label">Device port</label>
+							<input class="field-input" id="device_port" type="number" /></div>
+					</div>
+					<div class="grid-2">
+						<div class="field"><label class="field-label">LLM base URL</label>
+							<input class="field-input" id="llm_base_url" /></div>
+						<div class="field"><label class="field-label">LLM model</label>
+							<input class="field-input" id="llm_model" /></div>
+					</div>
+					<p class="muted" id="save-note"></p>
+				</div>
+			</div>
+		</section>
+	</main>
+
+	<script>
+		const $ = (id) => document.getElementById(id);
+		const STAGES = ['device', 'wake', 'stt', 'llm-req', 'llm-rsp', 'tool', 'tts', 'info', 'error'];
+		const hidden = new Set(JSON.parse(localStorage.getItem('hiddenStages') || '[]'));
+		const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+		const ago = (t) => { const s = Math.max(0, Math.round(Date.now() / 1000 - t)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`; };
+		const clock = (t) => new Date(t * 1000).toLocaleTimeString();
+
+		/* ── status ── */
+		async function refresh() {
+			try {
+				const s = await (await fetch('/api/status')).json();
+				const pill = $('conn');
+				pill.className = 'status-pill ' + (s.connected ? 'ok' : 'err');
+				pill.innerHTML = `<span class="dot"></span> ${s.connected ? 'connected' : 'disconnected'}`;
+				const d = s.device_info || {};
+				const rows = [['Host', `${s.host}:${s.port}`], ['Name', d.name || '—'], ['Model', d.model || '—'],
+					['ESPHome', d.esphome_version || '—'], ['Project', d.project || '—'], ['Entities', s.entity_count]];
+				if (s.last_error) rows.push(['Last error', s.last_error]);
+				$('device-rows').innerHTML = rows.map(([k, v]) =>
+					`<div class="detail-row"><div class="detail-text"><span class="detail-label">${esc(k)}</span>
+					 <span class="detail-value">${esc(v)}</span></div></div>`).join('');
+			} catch { $('conn').className = 'status-pill err'; $('conn').innerHTML = '<span class="dot"></span> agent unreachable'; }
+		}
+
+		/* ── filters ── */
+		function renderFilters() {
+			$('filters').innerHTML = STAGES.map(st =>
+				`<button class="stage-chip stage-${st} ${hidden.has(st) ? 'off' : ''}" onclick="toggleStage('${st}')">${st}</button>`).join('');
+		}
+		function toggleStage(st) {
+			hidden.has(st) ? hidden.delete(st) : hidden.add(st);
+			localStorage.setItem('hiddenStages', JSON.stringify([...hidden]));
+			renderFilters();
+			document.querySelectorAll(`.trace-row[data-stage="${st}"]`).forEach(r => r.style.display = hidden.has(st) ? 'none' : '');
+		}
+
+		/* ── monitor ── */
+		const mon = $('monitor');
+		function addEvent(e) {
+			if ($('paused').checked) return;
+			const row = document.createElement('div');
+			row.className = 'trace-row';
+			row.dataset.stage = e.stage;
+			if (hidden.has(e.stage)) row.style.display = 'none';
+			const dir = e.direction === 'in' ? '↓' : e.direction === 'out' ? '↑' : '';
+			const lvl = e.level && e.level !== 'info' ? ` lvl-${e.level}` : '';
+			const data = (e.data !== null && e.data !== undefined)
+				? `<details class="trace-data"><summary>payload</summary><pre>${esc(typeof e.data === 'string' ? e.data : JSON.stringify(e.data, null, 2))}</pre></details>` : '';
+			row.innerHTML = `<span class="stage-chip stage-${e.stage}${lvl}">${e.stage}</span>
+				<div class="trace-main"><span class="trace-text">${dir} ${esc(e.text)}</span>${data}</div>
+				<span class="log-time" title="${clock(e.t)}">${ago(e.t)}</span>`;
+			mon.prepend(row);
+			while (mon.childElementCount > 400) mon.lastElementChild.remove();
+		}
+		function clearMon() { mon.innerHTML = ''; }
+
+		let es;
+		function connectStream() {
+			es = new EventSource('/api/trace/stream');
+			es.onopen = () => { $('stream-pill').className = 'status-pill ok'; $('stream-pill').innerHTML = '<span class="dot"></span> live'; };
+			es.onmessage = (m) => { try { addEvent(JSON.parse(m.data)); } catch { } };
+			es.onerror = () => { $('stream-pill').className = 'status-pill warn'; $('stream-pill').innerHTML = '<span class="dot"></span> reconnecting'; };
+		}
+
+		/* ── config ── */
+		async function loadConfig() {
+			const c = await (await fetch('/api/config')).json();
+			for (const k of ['device_host', 'device_port', 'llm_base_url', 'llm_model']) $(k).value = c[k] ?? '';
+		}
+		async function saveConfig() {
+			const body = { device_host: $('device_host').value, device_port: Number($('device_port').value), llm_base_url: $('llm_base_url').value, llm_model: $('llm_model').value };
+			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+			$('save-note').textContent = r.error ? `Error: ${r.error}` : (r.note || 'Saved.');
+		}
+
+		renderFilters(); loadConfig(); refresh(); connectStream();
+		setInterval(refresh, 3000);
+	</script>
+</body>
+</html>

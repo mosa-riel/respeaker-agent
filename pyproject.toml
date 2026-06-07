@@ -1,0 +1,21 @@
+[project]
+name = "respeaker-agent"
+version = "0.1.0"
+description = "Custom voice agent for the reSpeaker XVF3800 — owns the device, fans tools in from MCP servers, drives the reTerminal e-paper."
+requires-python = ">=3.11"
+dependencies = [
+    "aioesphomeapi>=24",
+    "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.scripts]
+respeaker-agent = "respeaker_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/respeaker_agent"]
