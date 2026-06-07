@@ -59,9 +59,12 @@ Config: copy `config.example.json` → `config.json` (gitignored), `.env.example
   `respeaker-xvf3800-assistant.local`, native API port `6053`, no API encryption.
 - Home Assistant: `http://192.168.18.31:8123`. Reachable via the `home-assistant`
   MCP server (`uvx ha-mcp@latest`) — the first MCP tool source for the agent.
-- LLM/STT: Mistral OpenAI-compatible `https://api.mistral.ai/v1`. Chat
+- LLM/STT/TTS: Mistral OpenAI-compatible `https://api.mistral.ai/v1`. Chat
   `mistral-medium-latest` (small hallucinates tool calls — verify post-conditions).
-  STT `voxtral-mini-latest`. TTS: Piper (`nl_NL-ronnie-medium`).
+  STT `voxtral-mini-latest`. **TTS `voxtral-mini-tts-2603`** (Voxtral TTS, not
+  Piper — same provider, voice cloning, open weights; pluggable via `tts.py`, swap
+  `tts_base_url` for a local server). Voice = user's own `voice_id`. Speed-first:
+  `pcm` streaming, soxr `LQ` resample to 16 kHz. See `docs/reference/voice-audio.md`.
 - Phase-2 caveat: only one client can be the device's voice handler — HA currently
   owns it; stop HA's pipeline for this device before the agent takes over voice.
 

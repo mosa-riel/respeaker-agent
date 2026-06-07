@@ -47,15 +47,21 @@ agent service (Python, asyncio)
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Device link + web UI + live trace monitor | ✅ done (step 01) |
-| 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Piper) | next |
+| 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | in progress (TTS + audio + config done) |
 | 3 | `show_screen` tool → render (Pillow) + push to reTerminal e-paper | |
 | 4 | MCP client layer + multi-server config UI; tool dispatch | (overlaps p2) |
 | 5 | Package as HA add-on (Docker); deploy on the HA host | |
 
 ### Phase 2 notes
+- **TTS = Mistral Voxtral TTS** (`voxtral-mini-tts-2603`), not Piper — same
+  provider as STT+chat, Dutch, ~0.8s TTFB on `pcm`, voice cloning, open weights.
+  Pluggable behind `tts.py` so a local server is a config swap. See
+  [reference/voice-audio.md](reference/voice-audio.md). (Done: step 02.)
 - The voice flow over the native API uses `VoiceAssistant*` messages incl.
-  `VoiceAssistantAudio` (audio over the TCP API, no separate UDP). Reference:
-  `aioesphomeapi`'s voice_assistant handler.
+  `VoiceAssistantAudio` (audio over the TCP API, no separate UDP). Confirmed in
+  the installed `aioesphomeapi`: `subscribe_voice_assistant(handle_start,
+  handle_stop, handle_audio)` with the `API_AUDIO` subscription flag; events via
+  `send_voice_assistant_event(...)`, TTS via `send_voice_assistant_audio(bytes)`.
 - **Conflict:** only one client can be the device's voice handler. While HA still
   has the device adopted, HA owns voice. To let the agent own it, stop HA from
   handling this device's pipeline (or remove it from HA).

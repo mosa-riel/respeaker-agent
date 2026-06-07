@@ -6,18 +6,25 @@ non-secret Settings are editable here. Bind to 127.0.0.1 by default.
 
 from __future__ import annotations
 
+import base64
 import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import audio
+from .agent import AgentLoop
 from .config import Secrets, Settings
 from .device import DeviceLink
+from .stt import STTClient
+from .tools import demo_registry
 from .trace import TraceBus
+from .tts import make_tts
 
 STATIC_DIR = Path(__file__).parent / "static"
 SBOM_PATH = Path(__file__).resolve().parents[2] / "sbom.json"  # repo root
@@ -29,9 +36,15 @@ async def lifespan(app: FastAPI):
     secrets = Secrets.from_env()
     trace = TraceBus()
     link = DeviceLink(settings, secrets, trace)
+    tools = demo_registry()
     app.state.settings = settings
+    app.state.secrets = secrets
     app.state.trace = trace
     app.state.link = link
+    app.state.tools = tools
+    app.state.agent = AgentLoop(settings, secrets, trace, tools)
+    app.state.stt = STTClient(settings, secrets, trace)
+    app.state.tts = make_tts(settings, secrets, trace)
     trace.emit("info", "agent starting")
     await link.start()
     try:
@@ -96,22 +109,74 @@ async def put_config(payload: dict) -> JSONResponse:
     # input (edit config.json directly until a server-side allowlist exists).
     # See docs/reference/agent-security.md before relaxing this.
     settings: Settings = app.state.settings
-    str_fields = {"device_host", "llm_base_url", "llm_model"}
+    # Non-secret string fields. STT/TTS/LLM endpoints are safe to edit (they're just
+    # URLs/model ids/voice id — not subprocess exec like mcp_servers, not a network
+    # bind like web_host). tts_provider is validated against a fixed set below.
+    str_fields = {
+        "device_host", "llm_base_url", "llm_model", "system_prompt",
+        "stt_base_url", "stt_model",
+        "tts_provider", "tts_base_url", "tts_model", "tts_voice_id", "tts_format",
+    }
     for key in str_fields & payload.keys():
         val = payload[key]
         if not isinstance(val, str):
             return JSONResponse({"ok": False, "error": f"{key} must be a string"}, status_code=422)
+        if key == "tts_provider" and val.lower() not in ("voxtral", "openai", "openai-compatible"):
+            return JSONResponse({"ok": False, "error": "tts_provider must be voxtral|openai"}, status_code=422)
         setattr(settings, key, val)
-    if "device_port" in payload:
+    int_fields = {
+        "device_port": (1, 65535),
+        "tts_pcm_rate": (8000, 48000),
+        "tts_out_rate": (8000, 48000),
+        "max_tool_rounds": (1, 20),
+    }
+    for key, (lo, hi) in int_fields.items():
+        if key not in payload:
+            continue
         try:
-            port = int(payload["device_port"])
+            num = int(payload[key])
         except (TypeError, ValueError):
-            return JSONResponse({"ok": False, "error": "device_port must be an integer"}, status_code=422)
-        if not (1 <= port <= 65535):
-            return JSONResponse({"ok": False, "error": "device_port out of range"}, status_code=422)
-        settings.device_port = port
+            return JSONResponse({"ok": False, "error": f"{key} must be an integer"}, status_code=422)
+        if not (lo <= num <= hi):
+            return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
+        setattr(settings, key, num)
     settings.save()
     return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})
+
+
+@app.get("/api/tools")
+async def list_tools() -> JSONResponse:
+    # Tool names/specs available to the agent (demo set now; MCP-fed in phase 4).
+    return JSONResponse(app.state.tools.specs())
+
+
+@app.post("/api/run")
+async def run_agent(payload: dict) -> JSONResponse:
+    """Manual prompt → full agent loop (llm → tools → … → reply). Optional `speak`
+    synthesizes the reply and returns it as base64 WAV for in-browser playback.
+    Lets the whole pipeline be tested without the device owning voice."""
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "text is required"}, status_code=422)
+    settings: Settings = app.state.settings
+    try:
+        result = await app.state.agent.run(text, force_tool=bool(payload.get("force_tool")))
+    except Exception as err:  # noqa: BLE001 - surface to UI, already traced
+        return JSONResponse({"ok": False, "error": _safe(err)}, status_code=502)
+    out: dict = {"ok": True, "reply": result.text, "rounds": result.rounds, "tool_calls": result.tool_calls}
+    if payload.get("speak") and result.text:
+        try:
+            pcm = await app.state.tts.synth(result.text)
+            wav = audio.int16_to_wav_bytes(np.frombuffer(pcm, dtype="<i2"), settings.tts_out_rate)
+            out["audio_wav_b64"] = base64.b64encode(wav).decode()
+        except Exception as err:  # noqa: BLE001
+            out["tts_error"] = _safe(err)
+    return JSONResponse(out)
+
+
+def _safe(err: Exception) -> str:
+    msg = str(err) or err.__class__.__name__
+    return msg.splitlines()[0][:200]
 
 
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

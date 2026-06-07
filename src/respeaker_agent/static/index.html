@@ -48,6 +48,24 @@
 			</div>
 		</section>
 
+		<!-- Test chat (Playground) -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">💬</div>
+				<div><div class="section-title">Test chat</div>
+					<div class="section-desc">type a prompt → agent loop (LLM + tools) → reply. HA control arrives with MCP (phase 4).</div></div>
+				<label class="muted" style="margin-left:auto;display:flex;align-items:center;gap:5px">
+					<input type="checkbox" id="chat-speak" /> speak</label>
+			</div>
+			<div class="card-body">
+				<div class="chat-log" id="chat-log"></div>
+				<form class="chat-form" id="chat-form">
+					<input class="field-input" id="chat-input" placeholder="Stel een vraag of geef een opdracht…" autocomplete="off" />
+					<button class="btn-primary" type="submit" id="chat-send">Send</button>
+				</form>
+			</div>
+		</section>
+
 		<!-- Config -->
 		<section class="card">
 			<div class="card-head">
@@ -70,7 +88,31 @@
 						<div class="field"><label class="field-label">LLM model</label>
 							<input class="field-input" id="llm_model" /></div>
 					</div>
-					<p class="muted" id="save-note"></p>
+					<div class="grid-2">
+							<div class="field"><label class="field-label">STT base URL</label>
+								<input class="field-input" id="stt_base_url" /></div>
+							<div class="field"><label class="field-label">STT model</label>
+								<input class="field-input" id="stt_model" /></div>
+						</div>
+						<div class="grid-2">
+							<div class="field"><label class="field-label">TTS provider</label>
+								<input class="field-input" id="tts_provider" placeholder="voxtral | openai" /></div>
+							<div class="field"><label class="field-label">TTS base URL</label>
+								<input class="field-input" id="tts_base_url" /></div>
+						</div>
+						<div class="grid-2">
+							<div class="field"><label class="field-label">TTS model</label>
+								<input class="field-input" id="tts_model" /></div>
+							<div class="field"><label class="field-label">TTS voice id</label>
+								<input class="field-input" id="tts_voice_id" /></div>
+						</div>
+						<div class="grid-2">
+							<div class="field"><label class="field-label">TTS format</label>
+								<input class="field-input" id="tts_format" placeholder="pcm | wav" /></div>
+							<div class="field"><label class="field-label">TTS output rate (Hz)</label>
+								<input class="field-input" id="tts_out_rate" type="number" /></div>
+						</div>
+						<p class="muted" id="save-note"></p>
 				</div>
 			</div>
 		</section>
@@ -142,15 +184,64 @@
 		}
 
 		/* ── config ── */
+		const CFG_STR = ['device_host', 'llm_base_url', 'llm_model', 'stt_base_url', 'stt_model',
+			'tts_provider', 'tts_base_url', 'tts_model', 'tts_voice_id', 'tts_format'];
+		const CFG_NUM = ['device_port', 'tts_out_rate'];
 		async function loadConfig() {
 			const c = await (await fetch('/api/config')).json();
-			for (const k of ['device_host', 'device_port', 'llm_base_url', 'llm_model']) $(k).value = c[k] ?? '';
+			for (const k of [...CFG_STR, ...CFG_NUM]) if ($(k)) $(k).value = c[k] ?? '';
 		}
 		async function saveConfig() {
-			const body = { device_host: $('device_host').value, device_port: Number($('device_port').value), llm_base_url: $('llm_base_url').value, llm_model: $('llm_model').value };
+			const body = {};
+			for (const k of CFG_STR) body[k] = $(k).value;
+			for (const k of CFG_NUM) body[k] = Number($(k).value);
 			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 			$('save-note').textContent = r.error ? `Error: ${r.error}` : (r.note || 'Saved.');
 		}
+
+		/* ── test chat ── */
+		const chatLog = $('chat-log');
+		function addMsg(role, text) {
+			const el = document.createElement('div');
+			el.className = 'chat-msg chat-' + role;
+			const bub = document.createElement('div');
+			bub.className = 'chat-bubble';
+			bub.textContent = text;
+			el.appendChild(bub);
+			chatLog.appendChild(el);
+			chatLog.scrollTop = chatLog.scrollHeight;
+			return el;
+		}
+		async function sendChat(text) {
+			addMsg('user', text);
+			const pending = addMsg('assistant', '…');
+			const bub = pending.querySelector('.chat-bubble');
+			$('chat-send').disabled = true;
+			try {
+				const r = await (await fetch('/api/run', {
+					method: 'POST', headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ text, speak: $('chat-speak').checked }),
+				})).json();
+				if (!r.ok) { bub.textContent = 'Error: ' + (r.error || 'failed'); return; }
+				bub.textContent = r.reply || '(geen antwoord)';
+				if (r.tool_calls && r.tool_calls.length) {
+					const d = document.createElement('details');
+					d.className = 'trace-data';
+					d.innerHTML = `<summary>${r.tool_calls.length} tool call(s) · ${r.rounds} round(s)</summary><pre>${esc(JSON.stringify(r.tool_calls, null, 2))}</pre>`;
+					pending.appendChild(d);
+				}
+				if (r.audio_wav_b64) new Audio('data:audio/wav;base64,' + r.audio_wav_b64).play().catch(() => { });
+				if (r.tts_error) { const w = addMsg('assistant', 'TTS: ' + r.tts_error); w.classList.add('chat-err'); }
+			} catch (err) { bub.textContent = 'Error: ' + err; }
+			finally { $('chat-send').disabled = false; }
+		}
+		$('chat-form').addEventListener('submit', (e) => {
+			e.preventDefault();
+			const v = $('chat-input').value.trim();
+			if (!v) return;
+			$('chat-input').value = '';
+			sendChat(v);
+		});
 
 		renderFilters(); loadConfig(); refresh(); connectStream();
 		setInterval(refresh, 3000);

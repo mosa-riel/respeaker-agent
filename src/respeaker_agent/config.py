@@ -36,6 +36,35 @@ class Settings:
     device_port: int = 6053
     llm_base_url: str = "https://api.mistral.ai/v1"
     llm_model: str = "mistral-medium-latest"
+    # Reusable, generic guidance. The home's areas/devices and the actual tool
+    # NAMES are NOT hardcoded here — they come from the home-assistant MCP server
+    # and get injected per-conversation as a context block (phase 4). Keep this
+    # prompt tool-name-agnostic.
+    system_prompt: str = (
+        "Je bent de spraakassistent van dit huis. Antwoord altijd in het Nederlands, "
+        "in spreektaal en kort — je antwoord wordt hardop voorgelezen, dus geen "
+        "opsommingen of opmaak. Beantwoord algemene vragen eerlijk en uit je eigen "
+        "kennis. Om apparaten te bedienen of de actuele staat (aan/uit, temperatuur, "
+        "slot, sensor) op te vragen, gebruik je ALTIJD de beschikbare tools en verzin "
+        "je nooit een resultaat. Vraag om een ruimte als een opdracht meerdere "
+        "apparaten kan betreffen, tenzij er maar één van dat type is. Zeg nooit dat je "
+        "iets niet kunt opvragen als daar een tool voor bestaat."
+    )
+    max_tool_rounds: int = 5
+    # STT — OpenAI-compatible transcription. Swap base_url to a localhost server later.
+    stt_base_url: str = "https://api.mistral.ai/v1"
+    stt_model: str = "voxtral-mini-latest"
+    # TTS — pluggable endpoint. `tts_provider` selects the adapter; `tts_base_url`
+    # lets you flip hosted (Voxtral) ↔ local (localhost) without code changes.
+    #   provider "voxtral": Mistral speech API (base64 JSON), voice = your voice_id.
+    #   provider "openai":  OpenAI-compatible /audio/speech (binary stream).
+    tts_provider: str = "voxtral"
+    tts_base_url: str = "https://api.mistral.ai/v1"
+    tts_model: str = "voxtral-mini-tts-2603"
+    tts_voice_id: str = ""  # your Studio-recorded voice; set after recording
+    tts_format: str = "pcm"  # speed-first: pcm float32 streams (~0.8s TTFB vs ~3s wav)
+    tts_pcm_rate: int = 24000  # Voxtral pcm output rate (float32 LE @ 24 kHz)
+    tts_out_rate: int = 16000  # PCM rate pushed to the device speaker path
     web_host: str = "127.0.0.1"
     web_port: int = 8730
     mcp_servers: list[McpServer] = field(default_factory=list)
@@ -75,11 +104,18 @@ class Secrets:
     device_noise_psk: str | None
     device_password: str
     llm_api_key: str
+    stt_api_key: str
+    tts_api_key: str
 
     @classmethod
     def from_env(cls) -> "Secrets":
+        llm_key = os.getenv("LLM_API_KEY", "")
+        # STT/TTS default to the LLM key (same Mistral account); override per-endpoint
+        # when pointing at a separate/local server.
         return cls(
             device_noise_psk=(os.getenv("RESPEAKER_NOISE_PSK") or None),
             device_password=os.getenv("RESPEAKER_PASSWORD", ""),
-            llm_api_key=os.getenv("LLM_API_KEY", ""),
+            llm_api_key=llm_key,
+            stt_api_key=(os.getenv("STT_API_KEY") or llm_key),
+            tts_api_key=(os.getenv("TTS_API_KEY") or llm_key),
         )
