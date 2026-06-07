@@ -13,6 +13,7 @@
 	<header class="app-header">
 		<span class="app-brand text-gradient">reSpeaker Agent</span>
 		<span id="conn" class="status-pill"><span class="dot"></span> connecting…</span>
+		<span id="voice-pill" class="status-pill"><span class="dot"></span> voice</span>
 		<span id="stream-pill" class="status-pill" style="margin-left:auto"><span class="dot"></span> live</span>
 	</header>
 
@@ -154,6 +155,11 @@
 				const pill = $('conn');
 				pill.className = 'status-pill ' + (s.connected ? 'ok' : 'err');
 				pill.innerHTML = `<span class="dot"></span> ${s.connected ? 'connected' : 'disconnected'}`;
+				const v = s.voice || {};
+				const vp = $('voice-pill');
+				if (!v.enabled) { vp.className = 'status-pill'; vp.innerHTML = '<span class="dot"></span> voice off'; }
+				else if (v.attached) { vp.className = 'status-pill ok'; vp.innerHTML = `<span class="dot"></span> voice · ${esc(v.last || 'ready')}`; }
+				else { vp.className = 'status-pill warn'; vp.innerHTML = '<span class="dot"></span> voice: not attached'; }
 				const d = s.device_info || {};
 				const rows = [['Host', `${s.host}:${s.port}`], ['Name', d.name || '—'], ['Model', d.model || '—'],
 					['ESPHome', d.esphome_version || '—'], ['Project', d.project || '—'], ['Entities', s.entity_count]];

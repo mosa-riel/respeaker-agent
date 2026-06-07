@@ -55,6 +55,11 @@ class VoicePipeline:
         self._unsub: Any = None
         self._buf = bytearray()
         self._conv_id = "voice"
+        self.attached = False  # subscribed as the device's voice handler
+        self.last_activity: str = ""  # last pipeline stage, for the UI
+
+    def status(self) -> dict[str, Any]:
+        return {"enabled": self._s.voice_enabled, "attached": self.attached, "last": self.last_activity}
 
     def attach(self, cli: APIClient) -> None:
         """Subscribe as the device's voice handler. Called on each (re)connect."""
@@ -65,9 +70,11 @@ class VoicePipeline:
             handle_stop=self._on_stop,
             handle_audio=self._on_audio,
         )
+        self.attached = True
         self._trace.emit("info", "voice pipeline attached to device")
 
     def detach(self) -> None:
+        self.attached = False
         if self._unsub is not None:
             try:
                 self._unsub()
@@ -80,6 +87,7 @@ class VoicePipeline:
     async def _on_start(self, conversation_id: str, flags: int, audio_settings: Any, wake_word_phrase: str | None) -> int:
         self._buf = bytearray()
         self._conv_id = conversation_id or "voice"
+        self.last_activity = "luistert…"
         self._trace.emit("wake", wake_word_phrase or "(wake word)", data={"conversation_id": self._conv_id})
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         return 0  # API audio: audio arrives via handle_audio, no separate port
@@ -107,12 +115,15 @@ class VoicePipeline:
     # ── the turn ────────────────────────────────────────────────────────────────
 
     async def _handle_turn(self, audio: bytes) -> None:
+        self.last_activity = "transcriberen…"
         self._event(_EVT.VOICE_ASSISTANT_STT_START)
         text = await self._stt.transcribe(audio, in_rate=DEVICE_MIC_RATE)
         self._event(_EVT.VOICE_ASSISTANT_STT_END, {"text": text})
         if not text:
+            self.last_activity = "niets verstaan"
             return
 
+        self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
         result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get())
         self._convos.update(self._conv_id, result.messages)
@@ -120,11 +131,13 @@ class VoicePipeline:
         if not result.text:
             return
 
+        self.last_activity = "praten…"
         self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
         assert self._cli is not None
         async for chunk in self._tts.synth_stream(result.text):
             self._cli.send_voice_assistant_audio(chunk)
         self._event(_EVT.VOICE_ASSISTANT_TTS_END)
+        self.last_activity = "klaar"
 
     def _event(self, event_type: VoiceAssistantEventType, data: dict[str, str] | None = None) -> None:
         if self._cli is not None:

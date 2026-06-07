@@ -87,7 +87,9 @@ app = FastAPI(title="reSpeaker Agent", lifespan=lifespan)
 
 @app.get("/api/status")
 async def status() -> JSONResponse:
-    return JSONResponse(app.state.link.status())
+    data = app.state.link.status()
+    data["voice"] = app.state.voice.status()
+    return JSONResponse(data)
 
 
 @app.get("/api/trace")

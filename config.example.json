@@ -14,6 +14,7 @@
   "tts_out_rate": 16000,
   "web_host": "127.0.0.1",
   "web_port": 8730,
+  "voice_enabled": false,
   "mcp_servers": [
     {
       "name": "home-assistant",
