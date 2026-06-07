@@ -361,10 +361,11 @@
 			{ id: 'tts', icon: '🔊', label: 'TTS', shape: 'card', x: 16, y: 53, eq: true },
 			{ id: 'device', icon: '📡', label: 'Device', shape: 'chip', x: 15, y: 88, detached: true },
 		];
-		const EDGES = [['wake', 'stt'], ['stt', 'llm'], ['llm', 'tool'], ['tool', 'tts'], ['llm', 'tts']];
+		const EDGES = [['wake', 'stt'], ['stt', 'llm'], ['llm', 'tool'], ['llm', 'tts']];
 		const stageToNode = { wake: 'wake', stt: 'stt', 'llm-req': 'llm', 'llm-rsp': 'llm', tool: 'tool', tts: 'tts', device: 'device' };
 		const nodeTimers = {};
-		const flowByTarget = {};
+		let wires = [];       // {from, to, path}
+		let lastNode = null;  // where the signal currently sits → directional flow
 
 		function buildPipeline() {
 			const fm = $('flowmap');
@@ -396,40 +397,65 @@
 			svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
 			svg.setAttribute('width', W); svg.setAttribute('height', H);
 			svg.innerHTML = '';
-			for (const k in flowByTarget) delete flowByTarget[k];
+			wires = [];
 			EDGES.forEach(([a, b]) => {
 				const d = wirePath(nodeCenter(a, W, H), nodeCenter(b, W, H));
 				const base = document.createElementNS(NS, 'path'); base.setAttribute('d', d); base.setAttribute('class', 'wire');
 				const flow = document.createElementNS(NS, 'path'); flow.setAttribute('d', d); flow.setAttribute('class', 'wire-flow');
 				svg.appendChild(base); svg.appendChild(flow);
-				(flowByTarget[b] = flowByTarget[b] || []).push(flow);
+				wires.push({ from: a, to: b, path: flow });
 			});
 		}
 
-		function flowPulse(path) {
+		// Animate a comet along the wire between two nodes, in the given direction.
+		function flowPulse(path, forward) {
 			let len; try { len = path.getTotalLength(); } catch { return; }
 			if (!len) return;
-			const dash = Math.max(36, len * 0.2);
+			const dash = Math.max(38, len * 0.22);
 			path.style.strokeDasharray = `${dash} ${len + dash}`;
-			path.animate(
-				[{ strokeDashoffset: len, opacity: 0.95 }, { strokeDashoffset: -dash, opacity: 0.95 }],
-				{ duration: 680, easing: 'cubic-bezier(.45,0,.25,1)' }
-			);
+			const frames = forward
+				? [{ strokeDashoffset: len, opacity: .95 }, { strokeDashoffset: -dash, opacity: .95 }]
+				: [{ strokeDashoffset: -dash, opacity: .95 }, { strokeDashoffset: len, opacity: .95 }];
+			path.animate(frames, { duration: 720, easing: 'cubic-bezier(.45,0,.25,1)' });
+		}
+		function flow(from, to) {
+			const w = wires.find(w => (w.from === from && w.to === to) || (w.from === to && w.to === from));
+			if (w) flowPulse(w.path, w.from === from);
+		}
+		function setBubble(id, text) {
+			const sub = $('fn-sub-' + id);
+			if (sub && text) sub.textContent = text.length > 90 ? text.slice(0, 89) + '…' : text;
+		}
+		function glow(id, isError, ms) {
+			const node = $('fn-' + id); if (!node) return;
+			node.classList.remove('error');
+			if (isError) node.classList.add('error');
+			node.classList.add('active');
+			clearTimeout(nodeTimers[id]);
+			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), ms || 4500);
 		}
 
+		// Drive the graph from the REAL event order/direction:
+		// wake (mic on) → stt sends mic→STT → llm-req STT→LLM → tool out LLM→Tools,
+		// tool in Tools→LLM (repeats per tool call) → tts LLM→TTS. Bubbles persist.
 		function lightStage(e) {
-			const id = stageToNode[e.stage];
-			if (!id) return;
-			const node = $('fn-' + id);
-			if (!node) return;
-			node.classList.remove('error');
-			if (e.level === 'error') node.classList.add('error');
-			node.classList.add('active');
-			const sub = $('fn-sub-' + id);
-			if (sub && e.text) sub.textContent = e.text.length > 90 ? e.text.slice(0, 89) + '…' : e.text;
-			(flowByTarget[id] || []).forEach(flowPulse);
-			clearTimeout(nodeTimers[id]);
-			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), id === 'device' ? 900 : 2600);
+			const map = stageToNode[e.stage]; if (!map) return;
+			if (map === 'device') { glow('device', e.level === 'error', 900); return; }  // detached blink
+			let from = null, lit = map;
+			switch (e.stage) {
+				case 'wake': setBubble('wake', e.text || 'luistert…'); break;
+				case 'stt': from = 'wake'; setBubble('stt', e.text); break;
+				case 'llm-req': from = (lastNode && lastNode !== 'llm') ? lastNode : null; break;
+				case 'llm-rsp': setBubble('llm', e.text); break;
+				case 'tool':
+					if (e.direction === 'out') { from = 'llm'; lit = 'tool'; setBubble('tool', (e.data && e.data.name) || e.text); }
+					else { from = 'tool'; lit = 'llm'; }
+					break;
+				case 'tts': from = 'llm'; lit = 'tts'; setBubble('tts', e.text); break;
+			}
+			if (from && from !== lit) flow(from, lit);
+			glow(lit, e.level === 'error');
+			lastNode = lit;
 		}
 
 		function clearPipeline() {
@@ -440,6 +466,7 @@
 				if (sub) sub.textContent = '';
 				clearTimeout(nodeTimers[n.id]);
 			});
+			lastNode = null;
 		}
 
 		/* ── home context (devices) ── */
