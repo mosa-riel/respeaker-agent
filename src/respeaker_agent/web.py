@@ -28,6 +28,7 @@ from .stt import STTClient
 from .tools import demo_registry
 from .trace import TraceBus
 from .tts import make_tts
+from .voice import VoicePipeline
 
 STATIC_DIR = Path(__file__).parent / "static"
 SBOM_PATH = Path(__file__).resolve().parents[2] / "sbom.json"  # repo root
@@ -53,15 +54,21 @@ async def lifespan(app: FastAPI):
     app.state.mcp = mcp
     home_ctx = HomeContext(mcp, trace)
     app.state.home_ctx = home_ctx
+    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx)
+    app.state.voice = voice
+    if settings.voice_enabled:
+        link.post_connect = voice.attach  # (re)subscribe as voice handler on connect
+        trace.emit("info", "voice pipeline ENABLED (will own the device's voice)")
     trace.emit("info", "agent starting")
-    await link.start()
-    await mcp.start()  # connect MCP servers; populates the tool registry
+    await mcp.start()  # connect MCP servers + populate the tool registry FIRST
     await home_ctx.refresh()  # ground truth for the prompt (best-effort)
+    await link.start()  # connect device last → post_connect can attach voice
     refresh_task = asyncio.create_task(_periodic_home_refresh(home_ctx, settings))
     try:
         yield
     finally:
         refresh_task.cancel()
+        voice.detach()
         await mcp.stop()
         await link.stop()
 
@@ -174,6 +181,8 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
+    for key in {"voice_enabled"} & payload.keys():
+        setattr(settings, key, bool(payload[key]))
     settings.save()
     return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})
 

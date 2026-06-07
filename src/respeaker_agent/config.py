@@ -94,6 +94,10 @@ class Settings:
     tts_out_rate: int = 16000  # PCM rate pushed to the device speaker path
     web_host: str = "127.0.0.1"
     web_port: int = 8730
+    # Take over the device's voice handler (wake→STT→agent→TTS). OFF by default:
+    # only one client may own voice, and Home Assistant owns it while the device is
+    # adopted there. Stop HA's pipeline for this device before enabling.
+    voice_enabled: bool = False
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

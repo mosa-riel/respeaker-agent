@@ -6,7 +6,7 @@ list entities, log state changes. (Voice flow comes in phase 2.)
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from aioesphomeapi import APIClient, ReconnectLogic
 from zeroconf.asyncio import AsyncZeroconf
@@ -25,6 +25,9 @@ class DeviceLink:
         self._cli: APIClient | None = None
         self._reconnect: ReconnectLogic | None = None
         self._aiozc: AsyncZeroconf | None = None
+        # Optional hook run with the connected client after each (re)connect — used
+        # by the voice pipeline to (re)subscribe as the device's voice handler.
+        self.post_connect: Callable[[APIClient], None] | None = None
 
         self.connected: bool = False
         self.device_info: dict[str, Any] = {}
@@ -82,6 +85,8 @@ class DeviceLink:
                 f"connected to {self.device_info.get('name')} ({len(self.entities)} entities)",
                 data=self.device_info,
             )
+            if self.post_connect is not None:
+                self.post_connect(self._cli)
         except Exception as err:  # noqa: BLE001 - surface to UI
             self.last_error = _safe_error(err)
             self._trace.emit("error", f"device on_connect failed: {self.last_error}", level="error")
