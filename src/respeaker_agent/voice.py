@@ -62,8 +62,14 @@ class VoicePipeline:
         return {"enabled": self._s.voice_enabled, "attached": self.attached, "last": self.last_activity}
 
     def attach(self, cli: APIClient) -> None:
-        """Subscribe as the device's voice handler. Called on each (re)connect."""
-        self.detach()
+        """Subscribe as the device's voice handler. Called on each (re)connect.
+
+        On a reconnect the previous subscription died with the old connection — we
+        must NOT call the old unsub (it would send an `unsubscribe` on the NEW
+        connection and fight our fresh subscribe; the device logs "Client attempting
+        to unsubscribe that is not the current API Client"). Just drop the stale ref.
+        """
+        self._unsub = None
         self._cli = cli
         self._unsub = cli.subscribe_voice_assistant(
             handle_start=self._on_start,
