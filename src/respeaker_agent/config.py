@@ -107,6 +107,9 @@ class Settings:
     vad_silence_ms: int = 800
     vad_max_ms: int = 12000
     vad_prespeech_ms: int = 7000
+    # TTS playback: this firmware fetches a URL, so we serve the reply WAV on the LAN.
+    # Audio-only server, bound to the LAN so the device can reach it (random tokens).
+    tts_audio_port: int = 8731
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

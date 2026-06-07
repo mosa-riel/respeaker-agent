@@ -19,17 +19,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import uuid
 from typing import Any
 
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
+from .audio import int16_to_wav_bytes
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
 from .home_context import HomeContext
 from .stt import STTClient
 from .trace import TraceBus
 from .tts import TTSClient
+from .tts_server import TTSAudioServer
 
 _LOGGER = logging.getLogger(__name__)
 _EVT = VoiceAssistantEventType
@@ -46,6 +49,7 @@ class VoicePipeline:
         tts: TTSClient,
         convos: ConversationStore,
         home_ctx: HomeContext,
+        audio_srv: TTSAudioServer,
     ) -> None:
         self._s = settings
         self._trace = trace
@@ -54,6 +58,7 @@ class VoicePipeline:
         self._tts = tts
         self._convos = convos
         self._home = home_ctx
+        self._audio_srv = audio_srv
         self._cli: APIClient | None = None
         self._unsub: Any = None
         self._buf = bytearray()
@@ -202,20 +207,17 @@ class VoicePipeline:
         self.last_activity = "praten…"
         assert self._cli is not None
         self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
-        # HA streams TTS to ESPHome as 16k/16-bit/mono PCM in 512-sample (1024-byte)
-        # chunks, wrapped in TTS_STREAM_START/END. The device won't play without the
-        # STREAM_START event.
-        self._event(_EVT.VOICE_ASSISTANT_TTS_STREAM_START)
-        leftover = bytearray()
-        async for chunk in self._tts.synth_stream(result.text):
-            leftover.extend(chunk)
-            while len(leftover) >= 1024:
-                self._cli.send_voice_assistant_audio(bytes(leftover[:1024]))
-                del leftover[:1024]
-        if leftover:
-            self._cli.send_voice_assistant_audio(bytes(leftover))
-        self._event(_EVT.VOICE_ASSISTANT_TTS_STREAM_END)
-        self._event(_EVT.VOICE_ASSISTANT_TTS_END)
+        # This firmware plays TTS via its media_player fetching a URL ("No url in
+        # TTS_END event" otherwise). Synthesize the full reply, publish it as a WAV
+        # on the LAN audio server, and hand the device the URL. The device resamples
+        # (its media pipeline is 48 kHz) — we serve 16 kHz mono WAV.
+        pcm = await self._tts.synth(result.text)
+        wav = int16_to_wav_bytes(np.frombuffer(pcm, dtype="<i2"), self._s.tts_out_rate)
+        token = uuid.uuid4().hex
+        self._audio_srv.publish(token, wav)
+        url = self._audio_srv.url_for(token)
+        self._trace.emit("tts", f"serving reply ({len(wav)} B) at {url}", direction="out")
+        self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
         self.last_activity = "klaar"
 
     def _event(self, event_type: VoiceAssistantEventType, data: dict[str, str] | None = None) -> None:

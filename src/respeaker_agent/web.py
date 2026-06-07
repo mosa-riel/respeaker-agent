@@ -28,6 +28,7 @@ from .stt import STTClient
 from .tools import demo_registry
 from .trace import TraceBus
 from .tts import make_tts
+from .tts_server import TTSAudioServer
 from .voice import VoicePipeline
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -54,11 +55,14 @@ async def lifespan(app: FastAPI):
     app.state.mcp = mcp
     home_ctx = HomeContext(mcp, trace)
     app.state.home_ctx = home_ctx
-    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx)
+    audio_srv = TTSAudioServer(settings.tts_audio_port)
+    app.state.audio_srv = audio_srv
+    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx, audio_srv)
     app.state.voice = voice
     if settings.voice_enabled:
+        audio_srv.start(settings.device_host)  # LAN audio server for TTS playback
         link.post_connect = voice.attach  # (re)subscribe as voice handler on connect
-        trace.emit("info", "voice pipeline ENABLED (will own the device's voice)")
+        trace.emit("info", f"voice pipeline ENABLED; TTS audio on :{settings.tts_audio_port}")
     trace.emit("info", "agent starting")
     await mcp.start()  # connect MCP servers + populate the tool registry FIRST
     await home_ctx.refresh()  # ground truth for the prompt (best-effort)
@@ -69,6 +73,7 @@ async def lifespan(app: FastAPI):
     finally:
         refresh_task.cancel()
         voice.detach()
+        audio_srv.stop()
         await mcp.stop()
         await link.stop()
 
