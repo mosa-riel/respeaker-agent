@@ -90,6 +90,14 @@ async def _periodic_home_refresh(ctx: HomeContext, settings: Settings) -> None:
 app = FastAPI(title="reSpeaker Agent", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def _no_cache(request: Request, call_next):
+    # Local dev tool — never let the browser cache the UI (stale CSS/JS was biting).
+    resp = await call_next(request)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.get("/api/status")
 async def status() -> JSONResponse:
     data = app.state.link.status()

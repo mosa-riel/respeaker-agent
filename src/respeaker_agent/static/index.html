@@ -360,7 +360,7 @@
 		const nodeTimers = {};
 		function buildPipeline() {
 			$('pipeline').innerHTML = PIPE.map((n, i) =>
-				`${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node stage-${n.stages[0]}" id="pl-${n.id}" data-stage="${n.id}">
+				`${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node" id="pl-${n.id}" data-stage="${n.id}">
 					<div class="pl-icon">${n.icon}</div><div class="pl-label">${n.label}</div>
 					<div class="pl-sub" id="pl-sub-${n.id}"></div></div>`).join('');
 		}

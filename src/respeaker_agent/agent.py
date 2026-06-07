@@ -94,9 +94,9 @@ class AgentLoop:
                     fn = tc.get("function", {})
                     name = fn.get("name", "")
                     args = _parse_args(fn.get("arguments"))
-                    self._trace.emit("tool", f"→ {name}({_compact(args)})", direction="out", data={"name": name, "args": args})
+                    self._trace.emit("tool", f"→ {name}", direction="out", data={"name": name, "args": args})
                     result = await self._tools.dispatch(name, args)
-                    self._trace.emit("tool", f"← {name}: {_compact(result)}", direction="in", data={"name": name, "result": result})
+                    self._trace.emit("tool", f"← {name}", direction="in", data={"name": name, "result": result})
                     executed.append({"name": name, "args": args, "result": result})
                     convo.append({
                         "role": "tool",

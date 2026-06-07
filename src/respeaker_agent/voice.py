@@ -220,7 +220,8 @@ class VoicePipeline:
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)
-        self._trace.emit("tts", f"serving reply ({len(data)} B {fmt}) at {url}", direction="out")
+        # Show the spoken reply (relevant); keep the url/size in the payload.
+        self._trace.emit("tts", result.text, direction="out", data={"format": fmt, "bytes": len(data), "url": url})
         self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
         self.last_activity = "klaar"
 

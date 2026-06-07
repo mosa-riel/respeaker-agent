@@ -28,6 +28,7 @@ class DeviceLink:
         # Optional hook run with the connected client after each (re)connect — used
         # by the voice pipeline to (re)subscribe as the device's voice handler.
         self.post_connect: Callable[[APIClient], None] | None = None
+        self._media_key: int | None = None
 
         self.connected: bool = False
         self.device_info: dict[str, Any] = {}
@@ -77,7 +78,13 @@ class DeviceLink:
                 {"name": e.name or e.object_id, "type": type(e).__name__.replace("Info", "")}
                 for e in entities
             ]
+            self._media_key = next((e.key for e in entities if type(e).__name__ == "MediaPlayerInfo"), None)
             self._cli.subscribe_states(self._on_state)
+            if self._media_key is not None:
+                try:  # crank the device speaker so TTS is audible
+                    self._cli.media_player_command(self._media_key, volume=self._settings.device_volume)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("set volume failed: %s", err)
             self.connected = True
             self.last_error = None
             self._trace.emit(
