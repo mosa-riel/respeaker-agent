@@ -186,13 +186,13 @@ class VoicePipeline:
             self._trace.emit("error", f"voice turn failed: {err}", level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
         finally:
-            # A follow-up session that ends without a reply (silence) → close it + chime.
-            ended_session = self._s.voice_followup and self._conversing and not replied
+            # Ended without a reply (no speech / nothing to say) → session closes.
+            # Chime so you hear the mic shut. (Only meaningful with follow-up on.)
+            session_end = self._s.voice_followup and not replied
             self._run_end()
-            if ended_session and self._s.voice_end_chime:
+            if session_end and self._s.voice_end_chime:
                 await self._play_chime()
-            if ended_session:
-                self._conversing = False
+            self._conversing = False
             self._reset()
 
     def _reset(self) -> None:
