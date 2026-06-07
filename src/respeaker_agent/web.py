@@ -22,6 +22,7 @@ from . import audio
 from .agent import AgentLoop, ConversationStore
 from .config import McpServer, Secrets, Settings
 from .device import DeviceLink
+from .home_context import HomeContext
 from .mcp_client import McpManager
 from .stt import STTClient
 from .tools import demo_registry
@@ -50,14 +51,28 @@ async def lifespan(app: FastAPI):
     app.state.tts = make_tts(settings, secrets, trace)
     mcp = McpManager(settings, trace, tools)
     app.state.mcp = mcp
+    home_ctx = HomeContext(mcp, trace)
+    app.state.home_ctx = home_ctx
     trace.emit("info", "agent starting")
     await link.start()
     await mcp.start()  # connect MCP servers; populates the tool registry
+    await home_ctx.refresh()  # ground truth for the prompt (best-effort)
+    refresh_task = asyncio.create_task(_periodic_home_refresh(home_ctx, settings))
     try:
         yield
     finally:
+        refresh_task.cancel()
         await mcp.stop()
         await link.stop()
+
+
+async def _periodic_home_refresh(ctx: HomeContext, settings: Settings) -> None:
+    try:
+        while True:
+            await asyncio.sleep(max(60, settings.home_context_refresh_sec))
+            await ctx.refresh()
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="reSpeaker Agent", lifespan=lifespan)
@@ -163,6 +178,20 @@ async def put_config(payload: dict) -> JSONResponse:
     return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})
 
 
+@app.get("/api/home")
+async def get_home_context() -> JSONResponse:
+    ctx: HomeContext = app.state.home_ctx
+    return JSONResponse({"entity_count": ctx.entity_count, "context": ctx.get() or ""})
+
+
+@app.post("/api/home/refresh")
+async def refresh_home_context() -> JSONResponse:
+    # Manual "vernieuw apparaten" — also runs periodically + at startup.
+    ctx: HomeContext = app.state.home_ctx
+    count = await ctx.refresh()
+    return JSONResponse({"ok": True, "entity_count": count, "context": ctx.get() or ""})
+
+
 @app.get("/api/tools")
 async def list_tools() -> JSONResponse:
     # Tool names/specs available to the agent (demo set now; MCP-fed in phase 4).
@@ -184,7 +213,10 @@ async def run_agent(payload: dict) -> JSONResponse:
         convos.clear(conv_id)
     try:
         result = await app.state.agent.run(
-            text, history=convos.get(conv_id), force_tool=bool(payload.get("force_tool"))
+            text,
+            history=convos.get(conv_id),
+            context=app.state.home_ctx.get(),
+            force_tool=bool(payload.get("force_tool")),
         )
     except Exception as err:  # noqa: BLE001 - surface to UI, already traced
         return JSONResponse({"ok": False, "error": _safe(err)}, status_code=502)

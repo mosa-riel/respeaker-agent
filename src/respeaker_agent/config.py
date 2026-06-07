@@ -58,14 +58,26 @@ class Settings:
     system_prompt: str = (
         "Je bent de spraakassistent van dit huis. Antwoord altijd in het Nederlands, "
         "in spreektaal en kort — je antwoord wordt hardop voorgelezen, dus geen "
-        "opsommingen of opmaak. Beantwoord algemene vragen eerlijk en uit je eigen "
-        "kennis. Om apparaten te bedienen of de actuele staat (aan/uit, temperatuur, "
-        "slot, sensor) op te vragen, gebruik je ALTIJD de beschikbare tools en verzin "
-        "je nooit een resultaat. Vraag om een ruimte als een opdracht meerdere "
-        "apparaten kan betreffen, tenzij er maar één van dat type is. Zeg nooit dat je "
-        "iets niet kunt opvragen als daar een tool voor bestaat."
+        "opsommingen of opmaak.\n"
+        "GROND ALLES IN ECHTE DATA — verzin NOOIT iets. Harde regels:\n"
+        "- Noem alleen apparaten die in de lijst hieronder of in een toolresultaat "
+        "voorkomen. Verzin nooit een apparaat, naam, aantal of ruimte.\n"
+        "- Voor de actuele staat (aan/uit, temperatuur, stand, slot) roep je ALTIJD "
+        "eerst een tool aan; gok nooit de staat.\n"
+        "- Bestaat iets niet in de lijst of toolresultaten? Zeg dan dat je het niet "
+        "kent — verzin geen aannemelijk antwoord.\n"
+        "- Tel of groepeer alleen op basis van de lijst/toolresultaten, niet uit je "
+        "hoofd. Twijfel je? Gebruik een tool of zeg dat je het niet zeker weet.\n"
+        "- Vraag om een ruimte als een opdracht meerdere apparaten kan betreffen, "
+        "tenzij er maar één van dat type is.\n"
+        "Algemene kennisvragen (niet over dit huis) mag je gewoon eerlijk beantwoorden."
     )
     max_tool_rounds: int = 5
+    # Low temperature → far less fabrication (sticks to the grounded list / tool
+    # results). Voice control wants determinism, not creativity.
+    llm_temperature: float = 0.1
+    # Seconds between home-context (entity list) refreshes. Also refreshable on demand.
+    home_context_refresh_sec: int = 900
     # STT — OpenAI-compatible transcription. Swap base_url to a localhost server later.
     stt_base_url: str = "https://api.mistral.ai/v1"
     stt_model: str = "voxtral-mini-latest"

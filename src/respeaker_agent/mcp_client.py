@@ -60,6 +60,15 @@ class McpManager:
         await self._stack.aclose()
         self._sessions.clear()
 
+    async def call_raw(self, server: str, tool: str, args: dict[str, Any]) -> Any:
+        """Call a tool on a connected server directly, regardless of whether it's
+        exposed to the agent (used by HomeContext to read the entity list even when
+        that tool isn't in the curated set)."""
+        session = self._sessions.get(server)
+        if session is None:
+            raise RuntimeError(f"MCP server not connected: {server}")
+        return _result_to_json(await session.call_tool(tool, args))
+
     async def _connect(self, srv: McpServer) -> None:
         if srv.transport == "http":
             from mcp.client.streamable_http import streamablehttp_client

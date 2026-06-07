@@ -59,7 +59,16 @@ class AgentLoop:
         # overview injected fresh each turn so it never goes stale (phase 4).
         system = self._s.system_prompt
         if context:
-            system = f"{system}\n\nActuele context van dit huis:\n{context}"
+            system = (
+                f"{system}\n\n=== APPARATENLIJST (volledige en enige waarheid) ===\n"
+                f"{context}\n"
+                "Dit is de COMPLETE lijst van apparaten en hun ruimte. Een apparaat dat "
+                "hier niet letterlijk in staat, BESTAAT NIET — verzin er nooit een bij "
+                "(geen 'plafondlamp', 'spot' o.i.d. tenzij die exact in de lijst staat). "
+                "Tel en groepeer uitsluitend op basis van deze lijst. Gebruik de "
+                "entity_id tussen [haakjes] rechtstreeks in tools — niet eerst zoeken, "
+                "en nooit een entity_id verzinnen. Voor de actuele staat altijd een tool."
+            )
         convo: list[dict[str, Any]] = list(history or [])  # everything after system
         convo.append({"role": "user", "content": user_text})
         specs = self._tools.specs()
