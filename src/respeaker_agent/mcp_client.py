@@ -110,7 +110,8 @@ class McpManager:
             if not on:
                 continue
             qualified = f"{_slug(srv.name)}__{t.name}"
-            self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.inputSchema or {}))
+            overrides = (srv.tool_arg_overrides or {}).get(t.name, {})
+            self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.inputSchema or {}, overrides))
             exposed.append(qualified)
         self._sessions[srv.name] = session
         self.status[srv.name] = {
@@ -121,14 +122,16 @@ class McpManager:
         extra = f", {off_n} disabled" if off_n else ""
         self._trace.emit("info", f"MCP '{srv.name}' connected ({len(exposed)} tools{extra})", data={"tools": exposed})
 
-    def _make_tool(self, session: ClientSession, qualified: str, original: str, desc: str, schema: dict) -> Tool:
+    def _make_tool(self, session: ClientSession, qualified: str, original: str, desc: str, schema: dict, overrides: dict | None = None) -> Tool:
         # Normalise to a JSON-schema object so providers accept it.
         params = schema if isinstance(schema, dict) and schema.get("type") == "object" else {
             "type": "object", "properties": {}, "required": [],
         }
+        forced = overrides or {}
 
         async def handler(args: dict[str, Any]) -> Any:
-            result = await session.call_tool(original, args)
+            # Forced args win over whatever the model passed (e.g. include_hidden=false).
+            result = await session.call_tool(original, {**args, **forced})
             return _result_to_json(result)
 
         return Tool(name=qualified, description=desc, parameters=params, handler=handler)

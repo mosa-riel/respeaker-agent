@@ -27,7 +27,10 @@
         "ha_get_state",
         "ha_call_service",
         "ha_bulk_control"
-      ]
+      ],
+      "tool_arg_overrides": {
+        "ha_search_entities": { "include_hidden": false }
+      }
     },
     {
       "name": "funbox",

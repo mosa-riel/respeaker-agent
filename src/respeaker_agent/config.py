@@ -37,6 +37,10 @@ class McpServer:
     # belongs to the MCP server's own credentials (e.g. a non-admin Home Assistant
     # token). Names are the server's own (unqualified) tool names.
     enabled_tools: list[str] = field(default_factory=list)
+    # Force specific tool arguments regardless of what the model passes
+    # ({tool_name: {arg: value}}). E.g. {"ha_search_entities": {"include_hidden": false}}
+    # so hidden HA entities never surface — enforced server-side, not via the prompt.
+    tool_arg_overrides: dict = field(default_factory=dict)
 
     @property
     def transport(self) -> str:
