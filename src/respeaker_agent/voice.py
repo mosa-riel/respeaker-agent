@@ -16,9 +16,12 @@ this device before enabling this, or they fight.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 from typing import Any
 
+import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
 from .agent import AgentLoop, ConversationStore
@@ -55,6 +58,11 @@ class VoicePipeline:
         self._unsub: Any = None
         self._buf = bytearray()
         self._conv_id = "voice"
+        # server-side VAD state (reset per utterance)
+        self._finalizing = False
+        self._speech = False
+        self._silence_ms = 0.0
+        self._heard_ms = 0.0
         self.attached = False  # subscribed as the device's voice handler
         self.last_activity: str = ""  # last pipeline stage, for the UI
 
@@ -93,30 +101,84 @@ class VoicePipeline:
     async def _on_start(self, conversation_id: str, flags: int, audio_settings: Any, wake_word_phrase: str | None) -> int:
         self._buf = bytearray()
         self._conv_id = conversation_id or "voice"
+        self._finalizing = False
+        self._speech = False
+        self._silence_ms = 0.0
+        self._heard_ms = 0.0
         self.last_activity = "luistert…"
-        self._trace.emit("wake", wake_word_phrase or "(wake word)", data={"conversation_id": self._conv_id})
+        self._trace.emit("wake", wake_word_phrase or "(wake word)", data={"conversation_id": self._conv_id, "flags": flags})
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         return 0  # API audio: audio arrives via handle_audio, no separate port
 
     async def _on_audio(self, data: bytes, data2: bytes | None) -> None:
+        # This firmware streams continuously and never sends audio.end — WE decide
+        # end-of-speech (energy VAD), then finalize.
+        if self._finalizing or not data:
+            return
+        if not self._buf:
+            self._trace.emit("info", "voice: receiving audio…")
         self._buf.extend(data)
 
-    async def _on_stop(self, aborted: bool) -> None:
-        if aborted:
-            self._buf = bytearray()
+        samples = np.frombuffer(data, dtype="<i2")
+        if samples.size == 0:
             return
-        audio = bytes(self._buf)
-        self._buf = bytearray()
-        if not audio:
+        rms = math.sqrt(float(np.mean(samples.astype(np.float32) ** 2)))
+        dur_ms = samples.size / 16.0  # 16000 samples/s → samples/16 = ms
+        self._heard_ms += dur_ms
+        if rms > self._s.vad_threshold:
+            if not self._speech:
+                self._speech = True
+                self.last_activity = "opname…"
+                self._event(_EVT.VOICE_ASSISTANT_STT_VAD_START)
+            self._silence_ms = 0.0
+        elif self._speech:
+            self._silence_ms += dur_ms
+
+        end_of_speech = self._speech and self._silence_ms >= self._s.vad_silence_ms
+        too_long = self._heard_ms >= self._s.vad_max_ms
+        no_speech = not self._speech and self._heard_ms >= self._s.vad_prespeech_ms
+        if end_of_speech or too_long or no_speech:
+            self._finalize(spoke=self._speech and not no_speech)
+
+    async def _on_stop(self, aborted: bool) -> None:
+        # Device-driven stop (abort, or a firmware that DOES send end). Process
+        # whatever we have unless already finalizing.
+        if aborted:
+            self._reset()
             self._event(_EVT.VOICE_ASSISTANT_RUN_END)
             return
+        self._finalize(spoke=self._speech)
+
+    def _finalize(self, *, spoke: bool) -> None:
+        if self._finalizing:
+            return
+        self._finalizing = True
+        if self._speech:
+            self._event(_EVT.VOICE_ASSISTANT_STT_VAD_END)
+        audio = bytes(self._buf)
+        self._buf = bytearray()
+        asyncio.create_task(self._finish(audio, spoke))
+
+    async def _finish(self, audio: bytes, spoke: bool) -> None:
         try:
-            await self._handle_turn(audio)
+            if spoke and audio:
+                await self._handle_turn(audio)
+            else:
+                self._trace.emit("info", "voice: no speech captured")
         except Exception as err:  # noqa: BLE001 - never leave the device hanging
             self._trace.emit("error", f"voice turn failed: {err}", level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
         finally:
             self._event(_EVT.VOICE_ASSISTANT_RUN_END)
+            self._reset()
+
+    def _reset(self) -> None:
+        self._buf = bytearray()
+        self._finalizing = False
+        self._speech = False
+        self._silence_ms = 0.0
+        self._heard_ms = 0.0
+        self.last_activity = "klaar"
 
     # ── the turn ────────────────────────────────────────────────────────────────
 

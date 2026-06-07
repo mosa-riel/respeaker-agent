@@ -98,6 +98,15 @@ class Settings:
     # only one client may own voice, and Home Assistant owns it while the device is
     # adopted there. Stop HA's pipeline for this device before enabling.
     voice_enabled: bool = False
+    # Server-side end-of-speech detection (this firmware streams continuously and
+    # expects the server to decide when the user stopped). Energy-based VAD on the
+    # 16-bit mic PCM: speech when RMS > vad_threshold; finalize after vad_silence_ms
+    # of trailing silence; hard cap at vad_max_ms; give up if no speech within
+    # vad_prespeech_ms.
+    vad_threshold: int = 500
+    vad_silence_ms: int = 800
+    vad_max_ms: int = 12000
+    vad_prespeech_ms: int = 7000
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod
