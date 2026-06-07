@@ -81,6 +81,7 @@ class Settings:
     # STT — OpenAI-compatible transcription. Swap base_url to a localhost server later.
     stt_base_url: str = "https://api.mistral.ai/v1"
     stt_model: str = "voxtral-mini-latest"
+    stt_language: str = "nl"  # force transcription language (no auto-detect drift)
     # TTS — pluggable endpoint. `tts_provider` selects the adapter; `tts_base_url`
     # lets you flip hosted (Voxtral) ↔ local (localhost) without code changes.
     #   provider "voxtral": Mistral speech API (base64 JSON), voice = your voice_id.

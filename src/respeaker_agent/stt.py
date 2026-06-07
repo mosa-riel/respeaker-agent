@@ -23,8 +23,9 @@ class STTClient:
         self._key = secrets.stt_api_key
         self._trace = trace
 
-    async def transcribe(self, pcm16: bytes, *, in_rate: int = 16000, language: str = "nl") -> str:
+    async def transcribe(self, pcm16: bytes, *, in_rate: int = 16000, language: str | None = None) -> str:
         """pcm16 = raw 16-bit signed mono PCM. Returns the transcript text."""
+        language = language or self._s.stt_language
         samples = np.frombuffer(pcm16, dtype="<i2")
         wav = audio.int16_to_wav_bytes(samples, in_rate)
         url = f"{self._s.stt_base_url.rstrip('/')}/audio/transcriptions"
