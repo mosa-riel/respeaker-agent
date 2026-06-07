@@ -137,7 +137,8 @@
 				<div class="section-icon">🔌</div>
 				<div><div class="section-title">MCP servers</div>
 					<div class="section-desc">tool sources for the agent · stdio servers live in config.json (security)</div></div>
-				<button class="btn-ghost" style="margin-left:auto" onclick="loadMcp()">↻ Refresh</button>
+				<button class="btn-secondary" style="margin-left:auto" id="home-refresh" onclick="refreshHome()">↻ Refresh devices</button>
+				<button class="btn-ghost" onclick="loadMcp()">↻ Servers</button>
 			</div>
 			<div class="card-body">
 				<div id="mcp-list"></div>
@@ -146,6 +147,7 @@
 					<input class="field-input" id="mcp-url" placeholder="https://…  (remote MCP url only)" autocomplete="off" />
 					<button class="btn-primary" type="submit">Add</button>
 				</form>
+				<p class="muted" id="home-note"></p>
 				<p class="muted" id="mcp-note">Add remote (http/sse) servers here. Restart the agent to connect.</p>
 			</div>
 		</section>
@@ -390,8 +392,25 @@
 			});
 		}
 
+		/* ── home context (devices) ── */
+		async function loadHome() {
+			try {
+				const d = await (await fetch('/api/home')).json();
+				$('home-note').textContent = `${d.entity_count} devices grounded.`;
+			} catch { }
+		}
+		async function refreshHome() {
+			const btn = $('home-refresh'); if (btn) btn.disabled = true;
+			$('home-note').textContent = 'Refreshing devices…';
+			try {
+				const d = await (await fetch('/api/home/refresh', { method: 'POST' })).json();
+				$('home-note').textContent = `${d.entity_count} devices grounded (refreshed).`;
+			} catch (e) { $('home-note').textContent = 'Refresh failed: ' + e; }
+			finally { if (btn) btn.disabled = false; }
+		}
+
 		buildPipeline();
-		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp();
+		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome();
 		setInterval(refresh, 3000);
 	</script>
 </body>
