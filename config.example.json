@@ -28,6 +28,13 @@
         "ha_call_service",
         "ha_bulk_control"
       ]
+    },
+    {
+      "name": "funbox",
+      "command": "uv",
+      "args": ["run", "python", "scripts/funbox_mcp.py"],
+      "url": "",
+      "enabled": true
     }
   ]
 }
