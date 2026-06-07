@@ -18,6 +18,16 @@
 	</header>
 
 	<main class="app-main">
+		<!-- Live voice pipeline -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🛰️</div>
+				<div><div class="section-title">Voice pipeline</div>
+					<div class="section-desc">lights up live as each stage runs</div></div>
+			</div>
+			<div class="card-body"><div class="pipeline" id="pipeline"></div></div>
+		</section>
+
 		<!-- Device status -->
 		<section class="card">
 			<div class="card-head">
@@ -206,7 +216,7 @@
 		function connectStream() {
 			es = new EventSource('/api/trace/stream');
 			es.onopen = () => { $('stream-pill').className = 'status-pill ok'; $('stream-pill').innerHTML = '<span class="dot"></span> live'; };
-			es.onmessage = (m) => { try { addEvent(JSON.parse(m.data)); } catch { } };
+			es.onmessage = (m) => { try { const e = JSON.parse(m.data); addEvent(e); lightStage(e); } catch { } };
 			es.onerror = () => { $('stream-pill').className = 'status-pill warn'; $('stream-pill').innerHTML = '<span class="dot"></span> reconnecting'; };
 		}
 
@@ -335,6 +345,38 @@
 			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
 		});
 
+		/* ── live pipeline ── */
+		const PIPE = [
+			{ id: 'wake', icon: '🎙️', label: 'Wake', stages: ['wake'] },
+			{ id: 'stt', icon: '🗣️', label: 'STT', stages: ['stt'] },
+			{ id: 'llm', icon: '🧠', label: 'LLM', stages: ['llm-req', 'llm-rsp'] },
+			{ id: 'tool', icon: '🔧', label: 'Tools', stages: ['tool'] },
+			{ id: 'tts', icon: '🔊', label: 'TTS', stages: ['tts'] },
+			{ id: 'device', icon: '📢', label: 'Device', stages: ['device'] },
+		];
+		const stageToNode = {};
+		PIPE.forEach(n => n.stages.forEach(s => stageToNode[s] = n.id));
+		const nodeTimers = {};
+		function buildPipeline() {
+			$('pipeline').innerHTML = PIPE.map((n, i) =>
+				`${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node stage-${n.stages[0]}" id="pl-${n.id}" data-stage="${n.id}">
+					<div class="pl-icon">${n.icon}</div><div class="pl-label">${n.label}</div>
+					<div class="pl-sub" id="pl-sub-${n.id}"></div></div>`).join('');
+		}
+		function lightStage(e) {
+			const id = stageToNode[e.stage];
+			if (!id) return;
+			const node = $('pl-' + id);
+			if (!node) return;
+			node.classList.remove('error'); node.classList.add('active');
+			if (e.level === 'error') node.classList.add('error');
+			const sub = $('pl-sub-' + id);
+			if (sub && e.text) sub.textContent = e.text.length > 28 ? e.text.slice(0, 27) + '…' : e.text;
+			clearTimeout(nodeTimers[id]);
+			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), 2200);
+		}
+
+		buildPipeline();
 		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp();
 		setInterval(refresh, 3000);
 	</script>

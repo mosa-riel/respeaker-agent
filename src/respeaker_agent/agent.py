@@ -17,6 +17,7 @@ Every stage emits to the TraceBus: `llm-req`, `llm-rsp`, `tool` (action + result
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -116,13 +117,23 @@ class AgentLoop:
                          data={"model": self._s.llm_model, "messages": messages, "tools": [s["function"]["name"] for s in (specs or [])]})
         url = f"{self._s.llm_base_url.rstrip('/')}/chat/completions"
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
-        try:
-            resp = await cli.post(url, json=body, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPError as err:
-            self._trace.emit("error", f"LLM request failed: {_safe(err)}", level="error")
-            raise
+        # Retry transient rate-limits (429) / overloads (5xx) with backoff — the
+        # provider clears them in a second or two; don't fail the whole turn.
+        attempts = 4
+        for attempt in range(attempts):
+            try:
+                resp = await cli.post(url, json=body, headers=headers)
+                if resp.status_code in (429, 500, 502, 503) and attempt < attempts - 1:
+                    delay = _retry_after(resp) or (0.6 * (2 ** attempt))
+                    self._trace.emit("info", f"LLM {resp.status_code}; retry in {delay:.1f}s", level="warn")
+                    await asyncio.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except httpx.HTTPError as err:
+                self._trace.emit("error", f"LLM request failed: {_safe(err)}", level="error")
+                raise
         msg = data["choices"][0]["message"]
         self._trace.emit("llm-rsp", (msg.get("content") or "").strip() or "(tool call)", direction="in",
                          data={"finish": data["choices"][0].get("finish_reason"), "tool_calls": msg.get("tool_calls")})
@@ -165,6 +176,16 @@ def _trim(msgs: list[dict[str, Any]], max_messages: int) -> list[dict[str, Any]]
     # fallback: last user boundary
     user_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "user"]
     return msgs[user_idxs[-1]:] if user_idxs else msgs[-max_messages:]
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    raw = resp.headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return min(float(raw), 10.0)  # cap so a turn can't stall forever
+    except ValueError:
+        return None
 
 
 def _parse_args(raw: Any) -> dict[str, Any]:
