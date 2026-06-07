@@ -17,6 +17,9 @@ def main() -> None:
         host=settings.web_host,
         port=settings.web_port,
         log_level="info",
+        # Drop lingering connections (e.g. the SSE trace stream) after 3s so a
+        # restart/reload can't hang waiting on them.
+        timeout_graceful_shutdown=3,
     )
 
 

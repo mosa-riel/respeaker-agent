@@ -6,6 +6,7 @@ non-secret Settings are editable here. Bind to 127.0.0.1 by default.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -19,8 +20,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import audio
 from .agent import AgentLoop
-from .config import Secrets, Settings
+from .config import McpServer, Secrets, Settings
 from .device import DeviceLink
+from .mcp_client import McpManager
 from .stt import STTClient
 from .tools import demo_registry
 from .trace import TraceBus
@@ -45,11 +47,15 @@ async def lifespan(app: FastAPI):
     app.state.agent = AgentLoop(settings, secrets, trace, tools)
     app.state.stt = STTClient(settings, secrets, trace)
     app.state.tts = make_tts(settings, secrets, trace)
+    mcp = McpManager(settings, trace, tools)
+    app.state.mcp = mcp
     trace.emit("info", "agent starting")
     await link.start()
+    await mcp.start()  # connect MCP servers; populates the tool registry
     try:
         yield
     finally:
+        await mcp.stop()
         await link.stop()
 
 
@@ -82,10 +88,21 @@ async def trace_stream(request: Request) -> StreamingResponse:
         # Replay recent events first so a fresh tab is in sync, then go live.
         for evt in reversed(bus.recent(50)):
             yield f"data: {json.dumps(evt)}\n\n"
-        async for evt in bus.stream():
-            if await request.is_disconnected():
-                break
-            yield f"data: {json.dumps(evt)}\n\n"
+        agen = bus.stream()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    # Time out so we re-check disconnect and stay cancellable —
+                    # otherwise a quiet stream blocks forever and stalls shutdown.
+                    evt = await asyncio.wait_for(agen.__anext__(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(evt)}\n\n"
+        finally:
+            await agen.aclose()
 
     return StreamingResponse(
         gen(),
@@ -177,6 +194,88 @@ async def run_agent(payload: dict) -> JSONResponse:
 def _safe(err: Exception) -> str:
     msg = str(err) or err.__class__.__name__
     return msg.splitlines()[0][:200]
+
+
+@app.get("/api/mcp")
+async def list_mcp() -> JSONResponse:
+    settings: Settings = app.state.settings
+    status = app.state.mcp.status
+    servers = []
+    for srv in settings.mcp_servers:
+        st = status.get(srv.name, {})
+        servers.append({
+            "name": srv.name,
+            "transport": srv.transport,
+            "target": srv.url or (f"{srv.command} {' '.join(srv.args)}".strip()),
+            "enabled": srv.enabled,
+            "connected": bool(st.get("connected")),
+            "tool_count": len(st.get("tools", [])),
+            "error": st.get("error"),
+            # Full tool catalog (name/description/enabled) for the UI toggle list —
+            # only known after a successful connect.
+            "all_tools": st.get("all_tools", []),
+            "disabled_tools": srv.disabled_tools,
+        })
+    return JSONResponse({"servers": servers})
+
+
+@app.post("/api/mcp")
+async def add_mcp(payload: dict) -> JSONResponse:
+    # SECURITY: only REMOTE (http/sse url) servers can be added via the API — they
+    # launch no subprocess. stdio servers (command/args) run code, so they must be
+    # configured in config.json by hand, never from this unauthenticated endpoint.
+    # See docs/reference/security.md.
+    if payload.get("command") or payload.get("args"):
+        return JSONResponse(
+            {"ok": False, "error": "stdio (command/args) servers must be added in config.json, not via the API"},
+            status_code=403,
+        )
+    name = (payload.get("name") or "").strip()
+    url = (payload.get("url") or "").strip()
+    if not name or not url:
+        return JSONResponse({"ok": False, "error": "name and url are required"}, status_code=422)
+    if not url.startswith(("http://", "https://")):
+        return JSONResponse({"ok": False, "error": "url must be http(s)"}, status_code=422)
+    settings: Settings = app.state.settings
+    if any(m.name == name for m in settings.mcp_servers):
+        return JSONResponse({"ok": False, "error": f"server '{name}' already exists"}, status_code=409)
+    settings.mcp_servers.append(McpServer(name=name, url=url, enabled=True))
+    settings.save()
+    return JSONResponse({"ok": True, "note": "Added. Restart the agent to connect."})
+
+
+@app.patch("/api/mcp/{name}")
+async def toggle_mcp(name: str, payload: dict) -> JSONResponse:
+    # Enable/disable the whole server, and/or set its per-tool disabled list.
+    # Tool curation only — NOT a security boundary (that's the server's own creds).
+    settings: Settings = app.state.settings
+    found = False
+    for m in settings.mcp_servers:
+        if m.name != name:
+            continue
+        if "enabled" in payload:
+            m.enabled = bool(payload["enabled"])
+        if "disabled_tools" in payload:
+            dt = payload["disabled_tools"]
+            if not isinstance(dt, list) or not all(isinstance(x, str) for x in dt):
+                return JSONResponse({"ok": False, "error": "disabled_tools must be a list of strings"}, status_code=422)
+            m.disabled_tools = dt
+        found = True
+    if not found:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    settings.save()
+    return JSONResponse({"ok": True, "note": "Saved. Restart the agent to apply."})
+
+
+@app.delete("/api/mcp/{name}")
+async def remove_mcp(name: str) -> JSONResponse:
+    settings: Settings = app.state.settings
+    before = len(settings.mcp_servers)
+    settings.mcp_servers = [m for m in settings.mcp_servers if m.name != name]
+    if len(settings.mcp_servers) == before:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    settings.save()
+    return JSONResponse({"ok": True, "note": "Removed. Restart the agent to apply."})
 
 
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

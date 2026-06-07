@@ -116,6 +116,24 @@
 				</div>
 			</div>
 		</section>
+	<!-- MCP servers -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🔌</div>
+				<div><div class="section-title">MCP servers</div>
+					<div class="section-desc">tool sources for the agent · stdio servers live in config.json (security)</div></div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="loadMcp()">↻ Refresh</button>
+			</div>
+			<div class="card-body">
+				<div id="mcp-list"></div>
+				<form class="chat-form" id="mcp-form" style="margin-top:12px">
+					<input class="field-input" id="mcp-name" placeholder="name" autocomplete="off" style="max-width:170px" />
+					<input class="field-input" id="mcp-url" placeholder="https://…  (remote MCP url only)" autocomplete="off" />
+					<button class="btn-primary" type="submit">Add</button>
+				</form>
+				<p class="muted" id="mcp-note">Add remote (http/sse) servers here. Restart the agent to connect.</p>
+			</div>
+		</section>
 	</main>
 
 	<script>
@@ -243,7 +261,65 @@
 			sendChat(v);
 		});
 
-		renderFilters(); loadConfig(); refresh(); connectStream();
+		/* ── MCP servers ── */
+		async function loadMcp() {
+			try {
+				const d = await (await fetch('/api/mcp')).json();
+				const el = $('mcp-list');
+				if (!d.servers || !d.servers.length) { el.innerHTML = '<p class="muted">No MCP servers configured.</p>'; return; }
+				el.innerHTML = d.servers.map(s => {
+					const cls = s.connected ? 'ok' : (s.enabled ? 'err' : 'warn');
+					const stat = s.connected ? `${s.tool_count}/${s.all_tools.length} tools on` : (s.error || 'not connected');
+					const n = esc(s.name);
+					const toolList = (s.all_tools || []).map(t =>
+						`<label class="mcp-tool"><input type="checkbox" data-tool="${esc(t.name)}" ${t.enabled ? 'checked' : ''}/>
+							<span class="mcp-tool-name">${esc(t.name)}</span>
+							<span class="muted">${esc(t.description || '')}</span></label>`).join('');
+					const tools = s.all_tools && s.all_tools.length
+						? `<details class="trace-data mcp-tools-wrap"><summary>enable / disable tools (${s.tool_count}/${s.all_tools.length} on)</summary>
+							<div class="mcp-tools" data-server="${n}">${toolList}</div>
+							<button class="btn-secondary" onclick="saveTools('${n}')">Apply · restart to take effect</button></details>`
+						: (s.connected ? '' : '<p class="muted">Enable + restart to discover tools.</p>');
+					return `<div class="mcp-server">
+						<div class="detail-row">
+							<div class="detail-text">
+								<span class="status-pill ${cls}"><span class="dot"></span>${n}</span>
+								<span class="detail-value">${esc(s.transport)} · ${esc(s.target)} · ${esc(stat)}</span>
+							</div>
+							<div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+								<label class="muted" style="display:flex;align-items:center;gap:4px"><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleMcp('${n}', this.checked)"/> on</label>
+								<button class="btn-ghost" onclick="removeMcp('${n}')">Remove</button>
+							</div>
+						</div>${tools}</div>`;
+				}).join('');
+			} catch { $('mcp-list').innerHTML = '<p class="muted">Could not load MCP servers.</p>'; }
+		}
+		async function saveTools(name) {
+			const box = document.querySelector('.mcp-tools[data-server="' + name.replace(/"/g, '\\"') + '"]');
+			if (!box) return;
+			const disabled_tools = [...box.querySelectorAll('input[type=checkbox]')].filter(c => !c.checked).map(c => c.dataset.tool);
+			const r = await (await fetch('/api/mcp/' + encodeURIComponent(name), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled_tools }) })).json();
+			$('mcp-note').textContent = r.note || r.error || '';
+		}
+		async function toggleMcp(name, enabled) {
+			const r = await (await fetch('/api/mcp/' + encodeURIComponent(name), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) })).json();
+			$('mcp-note').textContent = r.note || r.error || ''; loadMcp();
+		}
+		async function removeMcp(name) {
+			if (!confirm('Remove MCP server "' + name + '"?')) return;
+			const r = await (await fetch('/api/mcp/' + encodeURIComponent(name), { method: 'DELETE' })).json();
+			$('mcp-note').textContent = r.note || r.error || ''; loadMcp();
+		}
+		$('mcp-form').addEventListener('submit', async (e) => {
+			e.preventDefault();
+			const name = $('mcp-name').value.trim(), url = $('mcp-url').value.trim();
+			if (!name || !url) return;
+			const r = await (await fetch('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) })).json();
+			$('mcp-note').textContent = r.note || r.error || '';
+			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
+		});
+
+		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp();
 		setInterval(refresh, 3000);
 	</script>
 </body>

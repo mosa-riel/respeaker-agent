@@ -38,6 +38,23 @@ launching (future), and untrusted data from the device + LLM.
   is sent only to that host — acceptable under the localhost-trust model (matches
   `llm_base_url`). Audio bytes from the engine are decoded as float32/PCM only
   (numpy `frombuffer`) — no code path, no deserialization risk.
+### MCP layer (step 04)
+
+- **Access control lives in the MCP server's credentials, not the agent.** For
+  Home Assistant that means a **non-admin long-lived token** in `.env` — HA rejects
+  admin/config/add-on/restart/registry calls server-side, so a prompt-injected
+  admin tool call fails at HA regardless of what the model attempts. The token is
+  never written to `config.json`; the stdio subprocess inherits it via `os.environ`.
+  Trade-off accepted: a non-admin token also can't read the area/floor registry.
+- **`disabled_tools` (UI toggle) is curation, NOT security** — it only hides tools
+  from the model; a determined caller bypassing the agent is still bounded by the
+  token. Documented as such in code + UI.
+- **`POST /api/mcp` adds remote (url) servers only.** stdio servers run a
+  subprocess, so their `command`/`args` must come from `config.json` (trusted
+  file), never the unauthenticated API. Enforced (403 on command/args in payload).
+- `_result_to_json` flattens MCP tool output to text/structured fields — no eval,
+  no deserialization of server-controlled objects into code.
+
 - `POST /api/run` (step 03) is unauthenticated like the rest of the API and calls
   the paid LLM/TTS per request. **Mitigated** by the `127.0.0.1` bind. **Gate:**
   same auth requirement as other writes before any non-localhost bind; consider a

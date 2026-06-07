@@ -20,7 +20,8 @@
       "command": "uvx",
       "args": ["ha-mcp@latest"],
       "url": "",
-      "enabled": true
+      "enabled": true,
+      "disabled_tools": []
     }
   ]
 }

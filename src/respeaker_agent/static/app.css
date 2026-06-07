@@ -214,3 +214,13 @@ h1, h2, h3, h4 {
 .chat-msg .trace-data { margin-top: 4px; max-width: 100%; }
 .chat-form { display: flex; gap: 10px; margin-top: 6px; }
 .chat-form .field-input { flex: 1; }
+
+/* ── MCP servers ── */
+.mcp-server { padding: 6px 0; border-bottom: 1px solid var(--color-gray-100); }
+.mcp-server:last-child { border-bottom: 0; }
+.mcp-tools-wrap { margin: 8px 0 4px; }
+.mcp-tools { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; margin: 8px 0; padding-right: 4px; }
+.mcp-tool { display: grid; grid-template-columns: 18px minmax(140px, 240px) 1fr; align-items: center; gap: 8px; padding: 3px 4px; border-radius: var(--radius-sm); font-size: 0.8125rem; }
+.mcp-tool:hover { background: var(--color-gray-50); }
+.mcp-tool-name { font-family: var(--font-heading); font-weight: 500; color: var(--color-gray-900); }
+.mcp-tool .muted { font-size: 0.6875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

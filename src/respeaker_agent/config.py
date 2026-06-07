@@ -26,6 +26,20 @@ class McpServer:
     args: list[str] = field(default_factory=list)
     url: str = ""
     enabled: bool = True
+    # Non-secret env for a stdio server. Secrets (tokens) stay in the agent's own
+    # .env and are inherited by the subprocess via os.environ — never put them here
+    # (config.json is not a secret store).
+    env: dict[str, str] = field(default_factory=dict)
+    # Per-tool enable/disable, managed from the UI. Default = expose everything the
+    # server offers; names listed here are hidden from the agent. This is tool
+    # CURATION (cut prompt bloat / unwanted tools), NOT a security boundary — real
+    # access control belongs to the MCP server's own credentials (e.g. a restricted
+    # Home Assistant token). Names are the server's own (unqualified) tool names.
+    disabled_tools: list[str] = field(default_factory=list)
+
+    @property
+    def transport(self) -> str:
+        return "http" if self.url else "stdio"
 
 
 @dataclass
