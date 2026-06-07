@@ -352,17 +352,20 @@
 			{ id: 'stt', icon: '🗣️', label: 'STT', stages: ['stt'] },
 			{ id: 'llm', icon: '🧠', label: 'LLM', stages: ['llm-req', 'llm-rsp'] },
 			{ id: 'tool', icon: '🔧', label: 'Tools', stages: ['tool'] },
-			{ id: 'tts', icon: '🔊', label: 'TTS', stages: ['tts'] },
+			{ id: 'tts', icon: '🔊', label: 'TTS', stages: ['tts'], eq: true },
 			{ id: 'device', icon: '📢', label: 'Device', stages: ['device'] },
 		];
 		const stageToNode = {};
 		PIPE.forEach(n => n.stages.forEach(s => stageToNode[s] = n.id));
 		const nodeTimers = {};
 		function buildPipeline() {
-			$('pipeline').innerHTML = PIPE.map((n, i) =>
-				`${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node" id="pl-${n.id}" data-stage="${n.id}">
-					<div class="pl-icon">${n.icon}</div><div class="pl-label">${n.label}</div>
-					<div class="pl-sub" id="pl-sub-${n.id}"></div></div>`).join('');
+			$('pipeline').innerHTML = PIPE.map((n, i) => {
+				const body = n.eq
+					? '<div class="pl-eq"><i></i><i></i><i></i><i></i><i></i></div>'
+					: `<div class="pl-sub" id="pl-sub-${n.id}"></div>`;
+				return `${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node" id="pl-${n.id}" data-stage="${n.id}">
+					<div class="pl-icon">${n.icon}</div><div class="pl-label">${n.label}</div>${body}</div>`;
+			}).join('');
 		}
 		function lightStage(e) {
 			const id = stageToNode[e.stage];

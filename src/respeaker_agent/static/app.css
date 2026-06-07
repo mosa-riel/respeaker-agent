@@ -240,3 +240,14 @@ h1, h2, h3, h4 {
 .pl-node.error .pl-icon { opacity: 1; filter: none; }
 .pl-node.error .pl-label { color: var(--color-mail-text); }
 @media (max-width: 640px) { .pl-arrow { display: none; } .pl-node { min-width: 70px; padding: 9px 4px; } }
+
+/* TTS equaliser (animates only when the TTS node is active) */
+.pl-eq { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 16px; margin-top: 2px; }
+.pl-eq i { width: 3px; height: 25%; background: var(--color-gray-300); border-radius: 2px; transition: background .2s; }
+.pl-node.active .pl-eq i { background: var(--color-brand); animation: eq .7s ease-in-out infinite; }
+.pl-node.active .pl-eq i:nth-child(1) { animation-delay: 0s; }
+.pl-node.active .pl-eq i:nth-child(2) { animation-delay: .15s; }
+.pl-node.active .pl-eq i:nth-child(3) { animation-delay: .3s; }
+.pl-node.active .pl-eq i:nth-child(4) { animation-delay: .45s; }
+.pl-node.active .pl-eq i:nth-child(5) { animation-delay: .2s; }
+@keyframes eq { 0%, 100% { height: 20%; } 50% { height: 100%; } }
