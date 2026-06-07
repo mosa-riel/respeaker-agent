@@ -18,15 +18,16 @@
 	</header>
 
 	<main class="app-main">
-		<!-- Live voice pipeline -->
-		<section class="card">
-			<div class="card-head">
-				<div class="section-icon">🛰️</div>
-				<div><div class="section-title">Voice pipeline</div>
-					<div class="section-desc">lights up live as each stage runs</div></div>
-				<button class="btn-ghost" style="margin-left:auto" onclick="clearPipeline()">Clear</button>
+		<!-- Live voice pipeline — flow-graph -->
+		<section class="flowmap-wrap">
+			<div class="flowmap-head">
+				<span class="flowmap-live">live</span>
+				<h2 class="flowmap-title">Voice pipeline</h2>
+				<button class="btn-ghost flowmap-clear" onclick="clearPipeline()">Clear</button>
 			</div>
-			<div class="card-body"><div class="pipeline" id="pipeline"></div></div>
+			<div class="flowmap" id="flowmap">
+				<svg class="wires" id="wires" aria-hidden="true"></svg>
+			</div>
 		</section>
 
 		<!-- Device status -->
@@ -348,45 +349,94 @@
 			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
 		});
 
-		/* ── live pipeline ── */
+		/* ── live pipeline flow-graph ── */
+		const NS = 'http://www.w3.org/2000/svg';
+		// x/y are % of the canvas. The pipeline flows Wake→STT→LLM→Tools→TTS; Device
+		// is the physical satellite — detached (no wire), it just blinks on activity.
 		const PIPE = [
-			{ id: 'wake', icon: '🎙️', label: 'Wake', stages: ['wake'] },
-			{ id: 'stt', icon: '🗣️', label: 'STT', stages: ['stt'] },
-			{ id: 'llm', icon: '🧠', label: 'LLM', stages: ['llm-req', 'llm-rsp'] },
-			{ id: 'tool', icon: '🔧', label: 'Tools', stages: ['tool'] },
-			{ id: 'tts', icon: '🔊', label: 'TTS', stages: ['tts'], eq: true },
-			{ id: 'device', icon: '📢', label: 'Device', stages: ['device'] },
+			{ id: 'wake', icon: '🎙️', label: 'Wake', shape: 'circle', x: 83, y: 17 },
+			{ id: 'stt', icon: '🗣️', label: 'STT', shape: 'card', x: 79, y: 50 },
+			{ id: 'llm', icon: '🧠', label: 'LLM', shape: 'circle', x: 50, y: 74 },
+			{ id: 'tool', icon: '🔧', label: 'Tools', shape: 'circle', x: 39, y: 27 },
+			{ id: 'tts', icon: '🔊', label: 'TTS', shape: 'card', x: 16, y: 53, eq: true },
+			{ id: 'device', icon: '📡', label: 'Device', shape: 'chip', x: 15, y: 88, detached: true },
 		];
-		const stageToNode = {};
-		PIPE.forEach(n => n.stages.forEach(s => stageToNode[s] = n.id));
+		const EDGES = [['wake', 'stt'], ['stt', 'llm'], ['llm', 'tool'], ['tool', 'tts'], ['llm', 'tts']];
+		const stageToNode = { wake: 'wake', stt: 'stt', 'llm-req': 'llm', 'llm-rsp': 'llm', tool: 'tool', tts: 'tts', device: 'device' };
 		const nodeTimers = {};
+		const flowByTarget = {};
+
 		function buildPipeline() {
-			$('pipeline').innerHTML = PIPE.map((n, i) => {
-				const body = n.eq
-					? '<div class="pl-eq"><i></i><i></i><i></i><i></i><i></i></div>'
-					: `<div class="pl-sub" id="pl-sub-${n.id}"></div>`;
-				return `${i ? '<div class="pl-arrow">→</div>' : ''}<div class="pl-node" id="pl-${n.id}" data-stage="${n.id}">
-					<div class="pl-icon">${n.icon}</div><div class="pl-label">${n.label}</div>${body}</div>`;
-			}).join('');
+			const fm = $('flowmap');
+			fm.querySelectorAll('.fn').forEach(n => n.remove());
+			PIPE.forEach(n => {
+				const el = document.createElement('div');
+				el.className = `fn fn-${n.shape}` + (n.detached ? ' fn-detached' : '');
+				el.id = 'fn-' + n.id;
+				el.style.left = n.x + '%'; el.style.top = n.y + '%';
+				el.innerHTML = `<div class="fn-icon">${n.icon}</div><div class="fn-label">${n.label}</div>` +
+					(n.eq ? '<div class="fn-eq"><i></i><i></i><i></i><i></i><i></i></div>'
+						: `<div class="fn-sub" id="fn-sub-${n.id}"></div>`);
+				fm.appendChild(el);
+			});
+			drawWires();
 		}
+
+		function nodeCenter(id, W, H) { const n = PIPE.find(p => p.id === id); return { x: n.x / 100 * W, y: n.y / 100 * H }; }
+		function wirePath(p0, p1) {
+			const dx = p1.x - p0.x, dy = p1.y - p0.y;
+			const c1x = p0.x + dx * 0.18, c1y = p0.y + dy * 0.55;
+			const c2x = p1.x - dx * 0.18, c2y = p1.y - dy * 0.55;
+			return `M ${p0.x.toFixed(1)} ${p0.y.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}`;
+		}
+		function drawWires() {
+			const fm = $('flowmap'), svg = $('wires');
+			const W = fm.clientWidth, H = fm.clientHeight;
+			if (!W || !H) return;
+			svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+			svg.setAttribute('width', W); svg.setAttribute('height', H);
+			svg.innerHTML = '';
+			for (const k in flowByTarget) delete flowByTarget[k];
+			EDGES.forEach(([a, b]) => {
+				const d = wirePath(nodeCenter(a, W, H), nodeCenter(b, W, H));
+				const base = document.createElementNS(NS, 'path'); base.setAttribute('d', d); base.setAttribute('class', 'wire');
+				const flow = document.createElementNS(NS, 'path'); flow.setAttribute('d', d); flow.setAttribute('class', 'wire-flow');
+				svg.appendChild(base); svg.appendChild(flow);
+				(flowByTarget[b] = flowByTarget[b] || []).push(flow);
+			});
+		}
+
+		function flowPulse(path) {
+			let len; try { len = path.getTotalLength(); } catch { return; }
+			if (!len) return;
+			const dash = Math.max(36, len * 0.2);
+			path.style.strokeDasharray = `${dash} ${len + dash}`;
+			path.animate(
+				[{ strokeDashoffset: len, opacity: 0.95 }, { strokeDashoffset: -dash, opacity: 0.95 }],
+				{ duration: 680, easing: 'cubic-bezier(.45,0,.25,1)' }
+			);
+		}
+
 		function lightStage(e) {
 			const id = stageToNode[e.stage];
 			if (!id) return;
-			const node = $('pl-' + id);
+			const node = $('fn-' + id);
 			if (!node) return;
-			node.classList.remove('error'); node.classList.add('active');
+			node.classList.remove('error');
 			if (e.level === 'error') node.classList.add('error');
-			const sub = $('pl-sub-' + id);
-			if (sub && e.text) sub.textContent = e.text.length > 120 ? e.text.slice(0, 119) + '…' : e.text;
+			node.classList.add('active');
+			const sub = $('fn-sub-' + id);
+			if (sub && e.text) sub.textContent = e.text.length > 90 ? e.text.slice(0, 89) + '…' : e.text;
+			(flowByTarget[id] || []).forEach(flowPulse);
 			clearTimeout(nodeTimers[id]);
-			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), 2200);
+			nodeTimers[id] = setTimeout(() => node.classList.remove('active', 'error'), id === 'device' ? 900 : 2600);
 		}
 
 		function clearPipeline() {
 			PIPE.forEach(n => {
-				const node = $('pl-' + n.id);
+				const node = $('fn-' + n.id);
 				if (node) node.classList.remove('active', 'error');
-				const sub = $('pl-sub-' + n.id);
+				const sub = $('fn-sub-' + n.id);
 				if (sub) sub.textContent = '';
 				clearTimeout(nodeTimers[n.id]);
 			});
@@ -410,6 +460,8 @@
 		}
 
 		buildPipeline();
+		if (window.ResizeObserver) new ResizeObserver(drawWires).observe($('flowmap'));
+		else window.addEventListener('resize', drawWires);
 		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome();
 		setInterval(refresh, 3000);
 	</script>
