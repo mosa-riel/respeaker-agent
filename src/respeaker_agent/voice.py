@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
+from .audio import flac_duration_seconds
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
 from .home_context import HomeContext
@@ -220,9 +221,15 @@ class VoicePipeline:
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)
+        secs = flac_duration_seconds(data) if fmt == "flac" else None
         # Show the spoken reply (relevant); keep the url/size in the payload.
-        self._trace.emit("tts", result.text, direction="out", data={"format": fmt, "bytes": len(data), "url": url})
+        self._trace.emit("tts", result.text, direction="out",
+                         data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None, "url": url})
         self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
+        # Hold the turn until playback finishes (the device plays the URL async) so the
+        # run doesn't end / re-arm mid-sentence. Duration from the FLAC header (no decode).
+        if secs:
+            await asyncio.sleep(min(secs + 0.4, 30.0))
         self.last_activity = "klaar"
 
     def _event(self, event_type: VoiceAssistantEventType, data: dict[str, str] | None = None) -> None:

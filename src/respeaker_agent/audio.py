@@ -53,6 +53,21 @@ def wav_to_int16_mono(data: bytes) -> tuple[np.ndarray, int]:
     return arr, rate
 
 
+def flac_duration_seconds(data: bytes) -> float | None:
+    """Read clip length from a FLAC STREAMINFO header — no decode, so it's cheap and
+    can't delay the response. Returns None if it can't parse."""
+    if data[:4] != b"fLaC" or len(data) < 8 + 18:
+        return None
+    # 4 magic + 4 block header, then STREAMINFO; sample_rate(20)+ch(3)+bps(5)+
+    # total_samples(36) live in bytes 10..18 of the STREAMINFO data.
+    val = int.from_bytes(data[8 + 10:8 + 18], "big")
+    sample_rate = val >> 44
+    total_samples = val & ((1 << 36) - 1)
+    if not sample_rate or not total_samples:
+        return None
+    return total_samples / sample_rate
+
+
 def int16_to_wav_bytes(samples: np.ndarray, rate: int) -> bytes:
     """Wrap a mono int16 array in a WAV container (for the STT upload)."""
     buf = io.BytesIO()
