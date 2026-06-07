@@ -60,6 +60,20 @@ class McpManager:
         await self._stack.aclose()
         self._sessions.clear()
 
+    def sources_summary(self) -> str | None:
+        """A compact per-server tool map for the prompt: which functions each MCP
+        source offers, so the model picks the right call (and fetches HA entities via
+        the tool itself) — instead of injecting the whole entity list every turn."""
+        lines = []
+        for srv in self._settings.mcp_servers:
+            st = self.status.get(srv.name, {})
+            if not st.get("connected"):
+                continue
+            tools = [t.split("__", 1)[-1] for t in st.get("tools", [])]
+            if tools:
+                lines.append(f"- {srv.name}: {', '.join(tools)}")
+        return "\n".join(lines) if lines else None
+
     async def call_raw(self, server: str, tool: str, args: dict[str, Any]) -> Any:
         """Call a tool on a connected server directly, regardless of whether it's
         exposed to the agent (used by HomeContext to read the entity list even when

@@ -82,6 +82,10 @@ class Settings:
     stt_base_url: str = "https://api.mistral.ai/v1"
     stt_model: str = "voxtral-mini-latest"
     stt_language: str = "nl"  # force transcription language (no auto-detect drift)
+    # Extra transcription params merged into the request (e.g. {"context_bias":
+    # "Keukenkopjes,Eettafel"} to bias vocab/spelling/language). Lists/dicts are
+    # JSON-encoded for the multipart form. Overrides the defaults above on conflict.
+    stt_extra: dict = field(default_factory=dict)
     # TTS — pluggable endpoint. `tts_provider` selects the adapter; `tts_base_url`
     # lets you flip hosted (Voxtral) ↔ local (localhost) without code changes.
     #   provider "voxtral": Mistral speech API (base64 JSON), voice = your voice_id.

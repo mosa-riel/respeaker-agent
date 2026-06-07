@@ -503,6 +503,7 @@
 					{ k: 'stt_base_url', label: 'STT base URL' },
 					{ k: 'stt_model', label: 'STT model' },
 					{ k: 'stt_language', label: 'Taal (bv. nl)' },
+					{ k: 'stt_extra', t: 'json', label: 'Extra params (JSON, bv. {"context_bias":"Keukenkopjes,Eettafel"})' },
 				]
 			},
 			llm: {
@@ -553,6 +554,7 @@
 				body.innerHTML = form.fields.map(f => {
 					const v = c[f.k] ?? '';
 					if (f.t === 'bool') return `<label class="modal-check"><input type="checkbox" data-k="${f.k}" data-t="bool" ${v ? 'checked' : ''}/> ${f.label}</label>`;
+					if (f.t === 'json') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" data-t="json" rows="3">${esc(JSON.stringify(v || {}, null, 0))}</textarea></div>`;
 					if (f.t === 'textarea') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" rows="4">${esc(String(v))}</textarea></div>`;
 					const it = (f.t === 'int' || f.t === 'float') ? 'number' : 'text';
 					const step = f.t === 'float' ? ' step="0.05"' : '';
@@ -564,13 +566,19 @@
 		function closeNode() { $('node-modal').hidden = true; modalNode = null; }
 		async function saveNode() {
 			const out = {};
+			let bad = null;
 			$('modal-body').querySelectorAll('[data-k]').forEach(el => {
 				const k = el.dataset.k, t = el.dataset.t;
 				if (t === 'bool') out[k] = el.checked;
 				else if (t === 'int') out[k] = parseInt(el.value, 10);
 				else if (t === 'float') out[k] = parseFloat(el.value);
+				else if (t === 'json') {
+					const s = el.value.trim();
+					try { out[k] = s ? JSON.parse(s) : {}; } catch { bad = k; }
+				}
 				else out[k] = el.value;
 			});
+			if (bad) { $('modal-note').textContent = `Ongeldige JSON bij ${bad}`; return; }
 			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) })).json();
 			$('modal-note').textContent = r.ok === false ? ('Fout: ' + r.error) : (r.note || 'Opgeslagen.');
 			if (r.ok !== false) { loadConfig(); setTimeout(closeNode, 800); }

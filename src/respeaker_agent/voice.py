@@ -28,7 +28,6 @@ from aioesphomeapi import APIClient, VoiceAssistantEventType
 from .audio import flac_duration_seconds
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
-from .home_context import HomeContext
 from .stt import STTClient
 from .trace import TraceBus
 from .tts import TTSClient
@@ -49,7 +48,7 @@ class VoicePipeline:
         agent: AgentLoop,
         tts: TTSClient,
         convos: ConversationStore,
-        home_ctx: HomeContext,
+        mcp: Any,
         audio_srv: TTSAudioServer,
     ) -> None:
         self._s = settings
@@ -58,7 +57,7 @@ class VoicePipeline:
         self._agent = agent
         self._tts = tts
         self._convos = convos
-        self._home = home_ctx
+        self._mcp = mcp  # McpManager — for the per-source tool summary
         self._audio_srv = audio_srv
         self._cli: APIClient | None = None
         self._unsub: Any = None
@@ -68,6 +67,7 @@ class VoicePipeline:
         self._finalizing = False
         self._ended = False
         self._speech = False
+        self._speech_byte = 0
         self._silence_ms = 0.0
         self._heard_ms = 0.0
         self._conversing = False  # in an active follow-up session
@@ -113,6 +113,7 @@ class VoicePipeline:
         self._finalizing = False
         self._ended = False
         self._speech = False
+        self._speech_byte = 0
         self._silence_ms = 0.0
         self._heard_ms = 0.0
         self.last_activity = "luistert…"
@@ -144,6 +145,9 @@ class VoicePipeline:
         if rms > self._s.vad_threshold:
             if not self._speech:
                 self._speech = True
+                # byte offset where speech began (this chunk) — used to trim leading
+                # silence; clear initial silence helps Voxtral lock the language.
+                self._speech_byte = max(0, len(self._buf) - len(data))
                 self.last_activity = "opname…"
                 self._event(_EVT.VOICE_ASSISTANT_STT_VAD_START)
             self._silence_ms = 0.0
@@ -171,7 +175,9 @@ class VoicePipeline:
         self._finalizing = True
         if self._speech:
             self._event(_EVT.VOICE_ASSISTANT_STT_VAD_END)
-        audio = bytes(self._buf)
+        # Trim leading silence to ~120ms before speech onset (16k/16-bit mono → 2 B/sample).
+        start = max(0, self._speech_byte - 16000 * 2 * 120 // 1000) if self._speech else 0
+        audio = bytes(self._buf[start:])
         self._buf = bytearray()
         asyncio.create_task(self._finish(audio, spoke))
 
@@ -218,7 +224,7 @@ class VoicePipeline:
 
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
-        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get())
+        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._mcp.sources_summary())
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
         if not result.text:

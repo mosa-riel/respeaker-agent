@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     app.state.home_ctx = home_ctx
     audio_srv = TTSAudioServer(settings.tts_audio_port)
     app.state.audio_srv = audio_srv
-    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx, audio_srv)
+    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, mcp, audio_srv)
     app.state.voice = voice
     if settings.voice_enabled:
         audio_srv.start(settings.device_host)  # LAN audio server for TTS playback
@@ -214,6 +214,10 @@ async def put_config(payload: dict) -> JSONResponse:
         setattr(settings, key, num)
     for key in {"voice_enabled", "voice_followup", "voice_end_chime"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
+    if "stt_extra" in payload:
+        if not isinstance(payload["stt_extra"], dict):
+            return JSONResponse({"ok": False, "error": "stt_extra must be a JSON object"}, status_code=422)
+        settings.stt_extra = payload["stt_extra"]
     # Don't let a scalar-settings save clobber mcp_servers edited in config.json
     # (stdio servers are added there; they only take effect on restart anyway).
     # mcp_servers are managed by the /api/mcp endpoints, not here.
@@ -262,7 +266,7 @@ async def run_agent(payload: dict) -> JSONResponse:
         result = await app.state.agent.run(
             text,
             history=convos.get(conv_id),
-            context=app.state.home_ctx.get(),
+            context=app.state.mcp.sources_summary(),
             force_tool=bool(payload.get("force_tool")),
         )
     except Exception as err:  # noqa: BLE001 - surface to UI, already traced

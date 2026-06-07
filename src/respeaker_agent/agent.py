@@ -61,14 +61,11 @@ class AgentLoop:
         system = self._s.system_prompt
         if context:
             system = (
-                f"{system}\n\n=== APPARATENLIJST (volledige en enige waarheid) ===\n"
-                f"{context}\n"
-                "Dit is de COMPLETE lijst van apparaten en hun ruimte. Een apparaat dat "
-                "hier niet letterlijk in staat, BESTAAT NIET — verzin er nooit een bij "
-                "(geen 'plafondlamp', 'spot' o.i.d. tenzij die exact in de lijst staat). "
-                "Tel en groepeer uitsluitend op basis van deze lijst. Gebruik de "
-                "entity_id tussen [haakjes] rechtstreeks in tools — niet eerst zoeken, "
-                "en nooit een entity_id verzinnen. Voor de actuele staat altijd een tool."
+                f"{system}\n\n=== TOOL-BRONNEN ===\n{context}\n"
+                "Kies de juiste tool per vraag. Je kent de apparaten NIET uit je hoofd: "
+                "gebruik de zoek-/lijst-tool van home-assistant om het juiste apparaat "
+                "+ entity_id te vinden, en de staat-tool voor de actuele staat. Verzin "
+                "nooit een apparaat, entity_id of resultaat."
             )
         convo: list[dict[str, Any]] = list(history or [])  # everything after system
         convo.append({"role": "user", "content": user_text})

@@ -7,6 +7,8 @@ server later; same shape.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import numpy as np
 
@@ -30,7 +32,11 @@ class STTClient:
         wav = audio.int16_to_wav_bytes(samples, in_rate)
         url = f"{self._s.stt_base_url.rstrip('/')}/audio/transcriptions"
         files = {"file": ("audio.wav", wav, "audio/wav")}
-        data = {"model": self._s.stt_model, "language": language}
+        data: dict = {"model": self._s.stt_model, "language": language}
+        # Merge user-supplied extra params (context_bias, etc.); JSON-encode complex
+        # values for the multipart form. These override the defaults on conflict.
+        for k, v in (self._s.stt_extra or {}).items():
+            data[k] = json.dumps(v) if isinstance(v, (list, dict)) else v
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
