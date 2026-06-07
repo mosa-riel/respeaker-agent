@@ -453,8 +453,9 @@
 					break;
 				case 'tts':
 					from = 'llm'; lit = 'tts'; setBubble('tts', e.text);
-					// keep the equaliser running for the actual clip length (FLAC duration)
-					if (e.data && e.data.seconds) ms = e.data.seconds * 1000 + 300;
+					// keep the equaliser running for the clip length + the device's
+					// fetch/decode lead (~1s), so it tracks the actual sound
+					if (e.data && e.data.seconds) ms = e.data.seconds * 1000 + 1400;
 					break;
 			}
 			if (from && from !== lit) flow(from, lit);

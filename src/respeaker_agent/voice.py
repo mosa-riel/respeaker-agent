@@ -227,9 +227,11 @@ class VoicePipeline:
                          data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None, "url": url})
         self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
         # Hold the turn until playback finishes (the device plays the URL async) so the
-        # run doesn't end / re-arm mid-sentence. Duration from the FLAC header (no decode).
+        # run doesn't end / re-arm mid-sentence. Duration from the FLAC header. The
+        # device only STARTS playing ~1s after we send the URL (fetch + decode +
+        # buffer), so add a generous tail buffer or RUN_END clips the end.
         if secs:
-            await asyncio.sleep(min(secs + 0.4, 30.0))
+            await asyncio.sleep(min(secs + 1.6, 40.0))
         self.last_activity = "klaar"
 
     def _event(self, event_type: VoiceAssistantEventType, data: dict[str, str] | None = None) -> None:
