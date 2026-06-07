@@ -200,10 +200,21 @@ class VoicePipeline:
             return
 
         self.last_activity = "praten…"
-        self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
         assert self._cli is not None
+        self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
+        # HA streams TTS to ESPHome as 16k/16-bit/mono PCM in 512-sample (1024-byte)
+        # chunks, wrapped in TTS_STREAM_START/END. The device won't play without the
+        # STREAM_START event.
+        self._event(_EVT.VOICE_ASSISTANT_TTS_STREAM_START)
+        leftover = bytearray()
         async for chunk in self._tts.synth_stream(result.text):
-            self._cli.send_voice_assistant_audio(chunk)
+            leftover.extend(chunk)
+            while len(leftover) >= 1024:
+                self._cli.send_voice_assistant_audio(bytes(leftover[:1024]))
+                del leftover[:1024]
+        if leftover:
+            self._cli.send_voice_assistant_audio(bytes(leftover))
+        self._event(_EVT.VOICE_ASSISTANT_TTS_STREAM_END)
         self._event(_EVT.VOICE_ASSISTANT_TTS_END)
         self.last_activity = "klaar"
 
