@@ -11,7 +11,7 @@
 # hassio_api: lets addon-run.py query the Supervisor for the MCP add-ons' real hostnames
 #   (git-repo installs hash the hostname prefix) and self-correct the mcp_servers urls.
 name: reSpeaker Agent
-version: "0.1.0"
+version: "0.1.2"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
