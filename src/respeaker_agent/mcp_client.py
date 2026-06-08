@@ -23,6 +23,7 @@ config and requires a restart to connect.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from typing import Any
@@ -173,21 +174,43 @@ class McpManager:
 
 
 def _result_to_json(result: Any) -> Any:
-    """Flatten an MCP CallToolResult to something JSON-serialisable for the model."""
-    parts: list[str] = []
-    for c in getattr(result, "content", []) or []:
-        text = getattr(c, "text", None)
-        if text is not None:
-            parts.append(text)
-        else:
-            parts.append(repr(getattr(c, "data", c)))
-    out: dict[str, Any] = {"content": "\n".join(parts) if parts else ""}
+    """Flatten an MCP CallToolResult to something compact + JSON-serialisable for the
+    model. Sends the data ONCE: prefer the structured object (servers like ha-mcp also
+    return it doubly-escaped in the text content — don't ship both). Strips ha-mcp's
+    repeated `metadata` noise (timezone/notes) and unwraps a lone `{"data": …}`."""
+    is_err = bool(getattr(result, "isError", False))
+
     structured = getattr(result, "structuredContent", None)
-    if structured:
-        out["structured"] = structured
-    if getattr(result, "isError", False):
+    if structured is None:
+        # No structured payload — use the text, parsed back to JSON if possible so it
+        # isn't a doubly-escaped string to the model.
+        parts = [t for c in (getattr(result, "content", []) or [])
+                 if (t := getattr(c, "text", None)) is not None]
+        text = "\n".join(parts) if parts else "".join(
+            repr(getattr(c, "data", c)) for c in (getattr(result, "content", []) or []))
+        try:
+            structured = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            out: dict[str, Any] = {"content": text}
+            if is_err:
+                out["isError"] = True
+            return out
+
+    structured = _trim(structured)
+    out = {"structured": structured}
+    if is_err:
         out["isError"] = True
     return out
+
+
+def _trim(obj: Any) -> Any:
+    """Drop ha-mcp's top-level `metadata` block and unwrap a lone `{"data": …}`."""
+    if isinstance(obj, dict):
+        if "metadata" in obj and len(obj) > 1:
+            obj = {k: v for k, v in obj.items() if k != "metadata"}
+        if set(obj.keys()) == {"data"}:
+            return obj["data"]
+    return obj
 
 
 def _slug(name: str) -> str:
