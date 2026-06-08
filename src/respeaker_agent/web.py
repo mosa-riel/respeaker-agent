@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, mcp, audio_srv)
     app.state.voice = voice
     if settings.voice_enabled:
-        audio_srv.start(settings.device_host)  # LAN audio server for TTS playback
+        audio_srv.start(settings.device_host, settings.tts_audio_host or None)  # LAN audio server for TTS playback
         link.post_connect = voice.attach  # (re)subscribe as voice handler on connect
         trace.emit("info", f"voice pipeline ENABLED; TTS audio on :{settings.tts_audio_port}")
     trace.emit("info", "agent starting")

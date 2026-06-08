@@ -1,17 +1,18 @@
 # Home Assistant add-on manifest for the reSpeaker agent.
 #
-# host_network: the agent connects to the reSpeaker over the ESPHome native API (:6053)
-#   by mDNS, and serves the TTS audio host (:8731) that the device fetches playback from
-#   — both need the host's real LAN identity (the TTS url auto-detects the host IP, which
-#   only works on the host network). With host_network the :8731 port is bound directly
-#   on the host; no `ports` mapping is needed.
-# ingress: the web UI is served through the HA frontend (authenticated, no separate LAN
-#   port). Because host_network also exposes :8099 on the LAN, the app rejects any client
-#   that isn't the ingress proxy (172.30.32.2) — see RESPEAKER_INGRESS in web.py.
-# hassio_api: lets addon-run.py query the Supervisor for the MCP add-ons' real hostnames
-#   (git-repo installs hash the hostname prefix) and self-correct the mcp_servers urls.
+# BRIDGED network (not host_network): this keeps the agent on the Supervisor's internal
+# network, so it can resolve the MCP add-ons by their hostnames (a host_network add-on
+# cannot — that was the whole networking headache). addon-run.py discovers the real MCP
+# hostnames via the Supervisor API (hassio_api).
+# - The reSpeaker is reached OUTBOUND by IP (set device_host to its IP — bridged has no
+#   mDNS, so its .local name won't resolve).
+# - The device fetches TTS audio FROM the agent, so the agent must hand it a LAN-reachable
+#   URL: we publish :8731 (ports) and advertise the host's LAN IP (tts_audio_host).
+# - ingress serves the UI through the HA frontend (authenticated); on bridged it is NOT
+#   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
+#   defense-in-depth.
 name: reSpeaker Agent
-version: "0.1.2"
+version: "0.2.0"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -21,17 +22,22 @@ arch:
 init: true
 boot: auto
 startup: services
-host_network: true
 hassio_api: true
 ingress: true
 ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:microphone-message
+ports:
+  8731/tcp: 8731
+ports_description:
+  8731/tcp: TTS audio the reSpeaker fetches for playback (set tts_audio_host to this host's LAN IP)
 options:
   api_key: ""
-  device_host: respeaker-xvf3800-assistant.local
+  device_host: 192.168.18.151
+  tts_audio_host: 192.168.18.31
   voice_enabled: true
 schema:
   api_key: "password?"
   device_host: str
+  tts_audio_host: str
   voice_enabled: bool

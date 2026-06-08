@@ -128,6 +128,11 @@ class Settings:
     # for this format and serve it on the LAN audio server (random tokens).
     tts_audio_port: int = 8731
     tts_voice_format: str = "flac"  # device-playback format (flac|mp3|wav|opus)
+    # Host the device should fetch TTS audio from. Empty = auto-detect the LAN IP on the
+    # interface to the device (works when the agent is on the host network). When the
+    # agent runs bridged (e.g. a HA add-on), its own IP isn't LAN-reachable — set this to
+    # the host's LAN IP and publish tts_audio_port so the device can reach it.
+    tts_audio_host: str = ""
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

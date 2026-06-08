@@ -2,9 +2,10 @@
 
 Bridges HA add-on conventions to the app:
   - maps the `api_key` option → the LLM/STT/TTS secret env vars the app reads;
-  - seeds a persistent /data/config.json from the shipped deployment config on first
-    boot (user options applied once), then always enforces the ingress network bind;
-  - turns on ingress mode, then launches the normal CLI entrypoint.
+  - applies network-critical options (device_host, tts_audio_host) every boot;
+  - discovers each MCP add-on's real internal hostname via the Supervisor API and
+    rewrites the mcp_servers urls (the agent runs bridged, so add-on DNS resolves);
+  - seeds /data/config.json on first boot, enforces the ingress bind, then launches.
 
 Secrets live only in env (never written to config.json), same as the .env flow.
 """
@@ -17,8 +18,8 @@ import shutil
 
 OPTIONS = "/data/options.json"      # HA-managed add-on options
 CONFIG = "/data/config.json"        # persistent app config (survives updates)
-# Shipped deployment config (HTTP MCP urls). config.json is gitignored, so a clean build
-# context may only have the example — fall back to it.
+# Shipped deployment config. config.json is gitignored, so a clean build context may only
+# have the example — fall back to it.
 SEEDS = ("/app/config.json", "/app/config.example.json")
 
 
@@ -30,8 +31,9 @@ def _load(path: str) -> dict:
         return {}
 
 
-# Our MCP add-ons: config-server-name → (slug suffix, MCP port). Git-repo installs give
-# add-ons a hashed hostname prefix, so we can't hardcode the url — discover it instead.
+# Our MCP add-ons: config-server-name → (slug suffix, MCP port). Add-on install gives a
+# hashed hostname prefix per repo, so we can't hardcode the url — discover it. The agent
+# runs BRIDGED, so it can both query the Supervisor and resolve add-on hostnames.
 _MCP_ADDONS = {
     "home-assistant": ("mcp_homeassistant", 8086),
     "funbox": ("mcp_funbox", 8785),
@@ -54,16 +56,16 @@ def _discover_mcp_urls(cfg: dict) -> None:
         )
         with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310 - fixed supervisor host
             addons = json.load(r).get("data", {}).get("addons", [])
-    except Exception:  # noqa: BLE001 - discovery is optional
+    except Exception as err:  # noqa: BLE001 - discovery is optional
+        print(f"[addon-run] MCP discovery skipped: {err}")
         return
 
-    # slug suffix -> real hostname (e.g. "mcp_funbox" -> "abc123-mcp-funbox")
     host_by_suffix: dict[str, str] = {}
     for a in addons:
         slug, host = a.get("slug", ""), a.get("hostname")
         if not host:
             continue
-        for _name, (suffix, _port) in _MCP_ADDONS.items():
+        for suffix, _port in _MCP_ADDONS.values():
             if slug == suffix or slug.endswith(f"_{suffix}"):
                 host_by_suffix[suffix] = host
 
@@ -75,6 +77,7 @@ def _discover_mcp_urls(cfg: dict) -> None:
         host = host_by_suffix.get(suffix)
         if host:
             srv["url"] = f"http://{host}:{port}/mcp"
+            print(f"[addon-run] MCP '{srv['name']}' → {srv['url']}")
 
 
 def main() -> None:
@@ -99,11 +102,16 @@ def main() -> None:
     # reaches it, never on a guessable LAN port without the proxy guard.
     cfg["web_host"] = "0.0.0.0"
     cfg["web_port"] = 8099
-    # Self-correct MCP urls from the actual installed add-on hostnames.
+    # Network-critical options, enforced every boot: bridged means the device must be
+    # reached by IP (no mDNS) and the device must fetch TTS audio from the host's LAN IP.
+    for k in ("device_host", "tts_audio_host"):
+        if opts.get(k):
+            cfg[k] = opts[k]
+    # Rewrite MCP urls to the real (discovered) add-on hostnames.
     _discover_mcp_urls(cfg)
     if first_boot:
         # Seed a few user-facing fields from options once; afterwards the UI owns them.
-        for k in ("device_host", "tts_voice_id", "llm_model"):
+        for k in ("tts_voice_id", "llm_model"):
             if opts.get(k):
                 cfg[k] = opts[k]
         if "voice_enabled" in opts:

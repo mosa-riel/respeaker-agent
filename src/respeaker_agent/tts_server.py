@@ -44,8 +44,10 @@ class TTSAudioServer:
     def url_for(self, name: str) -> str:
         return f"http://{self.lan_ip}:{self._port}/{name}"
 
-    def start(self, device_host: str) -> None:
-        self.lan_ip = _detect_lan_ip(device_host)
+    def start(self, device_host: str, advertise_host: str | None = None) -> None:
+        # When the agent is bridged (HA add-on), its own IP isn't reachable by the device
+        # — caller passes the host's LAN IP to advertise. Otherwise auto-detect.
+        self.lan_ip = advertise_host or _detect_lan_ip(device_host)
         server = self
 
         class Handler(BaseHTTPRequestHandler):
