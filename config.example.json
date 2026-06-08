@@ -25,11 +25,12 @@
       "enabled_tools": [
         "ha_search_entities",
         "ha_get_state",
-        "ha_call_service",
-        "ha_bulk_control"
+        "ha_call_service"
       ],
       "tool_arg_overrides": {
-        "ha_search_entities": { "include_hidden": false }
+        "ha_search_entities": {
+          "include_hidden": false
+        }
       }
     },
     {
