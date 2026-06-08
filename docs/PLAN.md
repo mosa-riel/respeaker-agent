@@ -48,7 +48,7 @@ agent service (Python, asyncio)
 |---|---|---|
 | 1 | Device link + web UI + live trace monitor | ✅ done (step 01) |
 | 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | ✅ working on hardware (server-VAD, FLAC-URL TTS, follow-up + chime, flow-graph UI, multi-MCP) — see steps 02–08 |
-| 3 | `show_screen` tool → render (Pillow) + push to reTerminal e-paper | |
+| 3 | `show_screen` → render (Pillow) + push to reTerminal e-paper | 🔶 reTerminal flashed (ESPHome) + push proven; screen-MCP started (see below) |
 | 4 | MCP client layer + multi-server config UI; tool dispatch | (overlaps p2) |
 | 5 | Package as HA add-on (Docker); deploy on the HA host | |
 
@@ -67,6 +67,21 @@ agent service (Python, asyncio)
   handling this device's pipeline (or remove it from HA).
 - Emit at every step: `wake`, `stt` (transcript), `llm-req` (full prompt+tools),
   `llm-rsp`, `tool` (name+args+result), `tts` (text) → all visible in the monitor.
+
+### Phase 3 notes — reTerminal e-paper via a screen-MCP
+- reTerminal E1001 = ESP32-S3 + 7.5" mono e-paper 800x480, deep-sleeps, ships with
+  SenseCraft (cloud, no local API) → **flashed with ESPHome** for local control
+  (`../ReSpeaker/devices/reterminal-e1001/`). Pinout from Seeed's ESPHome cookbook.
+- **Push pattern (proven on hardware):** the device has `online_image`
+  (`update_interval: never`) + an ESPHome API service `refresh_screen`. A server
+  hosts a rendered PNG; calling `refresh_screen` (via `aioesphomeapi.execute_service`)
+  makes the device fetch + redraw. Agent-initiated, near-instant (e-paper refresh
+  ~2-5s, no video).
+- **Architecture:** a dedicated **screen-MCP** (`scripts/screen_mcp.py`) owns this —
+  tools `show_text`/`show_image`/`clear_screen` render the PNG, host it (:8790), and
+  trigger the device. The agent just calls the tool. Becomes a standalone HTTP MCP
+  pod under the containerization plan. (Wiring TODO: point the device's online_image
+  url at the screen-MCP + register it in config.)
 
 ## Security gates (enforced)
 
