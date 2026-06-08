@@ -28,10 +28,10 @@ ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:microphone-message
 options:
-  mistral_api_key: ""
+  api_key: ""
   device_host: respeaker-xvf3800-assistant.local
   voice_enabled: true
 schema:
-  mistral_api_key: "password?"
+  api_key: "password?"
   device_host: str
   voice_enabled: bool

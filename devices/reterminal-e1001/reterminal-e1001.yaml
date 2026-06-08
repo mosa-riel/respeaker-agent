@@ -1,0 +1,82 @@
+# reTerminal E1001 — 7.5" mono e-paper (800x480), ESP32-S3.
+# First-flash config: WiFi + native API (no encryption, like the reSpeaker) + OTA +
+# a basic status screen. Pinout from Seeed's ESPHome cookbook:
+#   https://wiki.seeedstudio.com/reterminal_e10xx_with_esphome/
+# NO deep_sleep yet — keep it reachable for dev. Phase 3 adds online_image pulling a
+# rendered screen from the respeaker-agent (show_screen). Flash:
+#   uvx esphome run reterminal-e1001.yaml --device /dev/ttyUSB0
+
+esphome:
+  name: reterminal-e1001
+  friendly_name: reTerminal E1001
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO9
+
+font:
+  - file: "gfonts://Inter@700"
+    id: font_big
+    size: 52
+  - file: "gfonts://Inter@600"
+    id: font_med
+    size: 30
+
+http_request:
+  verify_ssl: false
+  timeout: 15s
+
+# Pulls a rendered PNG from the agent (here a test server). The agent updates the
+# image + (later) triggers a refresh → near-realtime push to the e-paper.
+online_image:
+  - id: screen_img
+    url: "http://192.168.18.31:8799/screen.png"
+    format: PNG
+    type: BINARY
+    update_interval: never   # only fetches when the agent calls refresh_screen
+    on_download_finished:
+      - component.update: epaper
+
+api:
+  services:
+    - service: refresh_screen
+      then:
+        - lambda: 'id(screen_img).update();'
+
+display:
+  - platform: waveshare_epaper
+    id: epaper
+    model: 7.50inv2
+    cs_pin: GPIO10
+    dc_pin: GPIO11
+    reset_pin:
+      number: GPIO12
+      inverted: false
+    busy_pin:
+      number: GPIO13
+      inverted: true
+    update_interval: never
+    lambda: |-
+      it.image(0, 0, id(screen_img));

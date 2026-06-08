@@ -1,69 +1,58 @@
 # Reference — Deployment (Home Assistant add-ons)
 
-> Living doc. The agent + each MCP run as **Home Assistant OS add-ons** on the
-> always-on HA host (`192.168.18.31`, Supervisor present). Each MCP lives in its **own
-> repo** and speaks **streamable-HTTP**; the agent connects by `url`. Bring-up uses
-> **local `/addons`**; a GitLab add-on repository comes later.
+> Living doc. The agent + each MCP run as **Home Assistant OS add-ons** (Supervisor on
+> `192.168.18.31`). Each lives in its **own public GitHub repo**, structured as an HA
+> **add-on repository**; the user adds the repo URLs in the Apps store. MCPs speak
+> **streamable-HTTP**; the agent connects by `url` and auto-discovers their hostnames.
 
-## Topology
+## Repos (public GitHub, `mosa-riel`)
 
-```
-HA OS host — Supervisor add-ons
-  respeaker-agent     [host_network] ingress UI :8099 · TTS audio host :8731 (LAN)
-        │ connects by url ▼ (HA internal DNS)
-  mcp-homeassistant   [bridged]  http://local-mcp-homeassistant:8086/mcp   (ha-mcp + SUPERVISOR_TOKEN)
-  mcp-funbox          [bridged]  http://local-mcp-funbox:8785/mcp
-  mcp-websearch       [bridged]  http://local-mcp-websearch:8786/mcp
-  mcp-screen          [bridged]  http://local-mcp-screen:8788/mcp  + PNG host :8799 (LAN, ports)
-LAN devices: reSpeaker .151 (fetches TTS :8731) · reTerminal .152 (fetches PNG :8799)
-```
-
-## Repos
-
-| repo | role | add-on network | ports |
+| repo | role | add-on network | MCP port |
 |---|---|---|---|
-| `respeaker-agent` | the agent (this repo) | `host_network` | ingress 8099, TTS 8731 |
-| `mcp-homeassistant` | HA control (wraps upstream `ha-mcp`) | bridged | 8086 (internal) |
-| `mcp-funbox` | demo tools | bridged | 8785 (internal) |
-| `mcp-websearch` | DuckDuckGo search | bridged | 8786 (internal) |
-| `mcp-screen` | reTerminal e-paper | bridged | 8788 (internal), 8799 (LAN) |
+| `respeaker-agent` | the agent | `host_network` | ingress 8099, TTS 8731 |
+| `mcp-homeassistant` | HA control (wraps upstream `ha-mcp`) | bridged | 8086 |
+| `mcp-funbox` | demo tools | bridged | 8785 |
+| `mcp-websearch` | DuckDuckGo search | bridged | 8786 |
+| `mcp-screen` | reTerminal e-paper | bridged | 8788 (+ PNG 8799 on LAN) |
 
-Add-on files per repo: `config.yaml` (manifest), `Dockerfile`, source, `README.md`.
+Each repo: `repository.yaml` at the root + the add-on in a slug subfolder
+(`<slug>/config.yaml` + `Dockerfile` + source). Supervisor clones the repo and builds the
+image locally — no registry/CI needed. The agent's add-on (`respeaker_agent_addon/`) has
+a Dockerfile that **git-clones the repo** into the image, because the build context (the
+subfolder) can't see the app at the repo root.
 
 ## Networking rationale
 
-- **Agent = `host_network`.** It connects to the reSpeaker by mDNS over the ESPHome
-  native API (`:6053`), and the TTS audio host (`tts_server.py`) auto-detects the host's
-  real LAN IP so the device can fetch playback from `:8731` — both need the host stack.
-- **MCPs = bridged**, reachable by HA internal DNS `local-mcp-<name>:<port>`. A
-  host_network add-on (the agent) **can** reach bridged add-ons by name. Bridged gives
-  isolation and a stable readable hostname.
-- **`mcp-screen` is bridged too** (uniform url) but publishes its PNG port to the host
-  LAN via a `ports` mapping (the reTerminal fetches `/screen.png`). It reaches the device
-  API **by IP** — bridged containers can't do mDNS — so set `reterminal_host` to the
-  device's reserved IP, not `reterminal-e1001.local`.
+- **Agent = `host_network`.** It reaches the reSpeaker by mDNS over the ESPHome API
+  (`:6053`), and the TTS audio host (`tts_server.py`) auto-detects the host's real LAN IP
+  so the device can fetch playback from `:8731` — both need the host stack.
+- **MCPs = bridged**, reachable from the host_network agent by their internal DNS
+  hostname.
+- **`mcp-screen`** is bridged but publishes its PNG port (`8799`) to the host LAN via a
+  `ports` mapping (the reTerminal fetches `/screen.png`). It reaches the device API **by
+  IP** — bridged containers can't do mDNS — so set `reterminal_host` to the device's
+  reserved IP, not `reterminal-e1001.local`.
 
-> The `local-` DNS prefix is for **local `/addons`** installs. Installing from a git
-> add-on repository changes the prefix (hashed repo id) — update the `config.json` urls
-> then. Confirm the exact hostname on the add-on's Supervisor page.
+## MCP hostname auto-discovery
+
+Git-repo add-ons get a **hashed DNS hostname prefix** (e.g. `abc123-mcp-funbox`), not
+something predictable — so the `mcp_servers` urls can't be hardcoded. On boot,
+`addon-run.py` (with `hassio_api: true`) queries `http://supervisor/addons`, matches the
+installed MCP add-ons by slug suffix (`mcp_funbox`, `mcp_websearch`, `mcp_screen`,
+`mcp_homeassistant`), and rewrites each `mcp_servers` url to
+`http://<real-hostname>:<port>/mcp`. Best-effort; a no-op when run outside HA. Net:
+**install an MCP add-on → the agent finds it; no url editing.**
 
 ## Config & secrets (agent add-on)
 
-- `addon-run.py` is the entrypoint. It maps the `mistral_api_key` option →
+- `addon-run.py` is the entrypoint. It maps the **`api_key`** option →
   `LLM_API_KEY`/`STT_API_KEY`/`TTS_API_KEY` env (secrets only in env, never in
-  `config.json`); seeds `/data/config.json` from the shipped deployment config on first
-  boot; always forces the ingress bind (`web_host=0.0.0.0`, `web_port=8099`); sets
-  `RESPEAKER_INGRESS=1` and `RESPEAKER_CONFIG=/data/config.json`.
+  `config.json`); seeds `/data/config.json` from the shipped config on first boot;
+  auto-discovers MCP urls; always forces the ingress bind (`web_host=0.0.0.0`,
+  `web_port=8099`); sets `RESPEAKER_INGRESS=1`.
 - `/data` is the persistent volume — `config.json` there survives updates and is the
-  runtime source of truth (UI edits persist).
-
-## MCP registry
-
-MCP topology lives in the agent's `config.json` `mcp_servers` (seeded into `/data`,
-runtime-managed by `/api/mcp` + the UI). Each entry is `{name, url, enabled,
-enabled_tools, tool_arg_overrides}`. Adding an MCP (incl. an external one) = add a url.
-*(Future option: auto-discover MCP add-ons via the Supervisor `/addons` API instead of a
-hand-listed registry.)*
+  runtime source of truth (UI edits persist). Endpoints/models are provider-agnostic
+  (OpenAI-compatible base URLs in `config.json`).
 
 ## HA-MCP credential
 
@@ -72,17 +61,23 @@ hand-listed registry.)*
 `homeassistant_api: true`. The supervisor-token path needs no managed secret and is
 role-scoped (`hassio_role`). Leave the options blank to use it.
 
-## Install (local /addons bring-up)
+## Install
 
-1. Copy each repo folder into the HA host's `/addons` dir (via the SSH or Samba add-on).
-2. Settings → Add-ons → ⋮ → check / install each **Local add-on**.
-3. Set the agent add-on's `mistral_api_key` option; start the MCP add-ons, then the agent.
-4. Open the agent UI from the HA sidebar (ingress). `/api/health` (the rollout strip)
-   shows each MCP `up` with its tool count.
-5. Reflash the reTerminal `online_image` url → `http://<ha-host-ip>:8799/screen.png`.
+1. **Apps → ⋮ → Repositories**, add each URL (no leading space, or git fails with
+   `protocol ' https' is not supported`):
+   `https://github.com/mosa-riel/{respeaker-agent,mcp-funbox,mcp-websearch,mcp-screen,mcp-homeassistant}`
+2. Install the 4 MCP add-ons (first build is slow — `mcp-screen` installs fonts,
+   `mcp-homeassistant` pulls the upstream image). Start them.
+   - `mcp-screen` → set `reterminal_host` to the device IP.
+   - `mcp-homeassistant` → leave `ha_token`/`ha_url` blank (Supervisor token).
+3. Install the agent add-on → set `api_key` → start.
+4. Open the agent from the HA sidebar (ingress). `/api/health` (rollout strip) shows each
+   MCP `up` with its tool count.
+5. Reflash the reTerminal `online_image` url → `http://<ha-host-ip>:8799/screen.png`
+   (config in `devices/reterminal-e1001/`).
 
 ## Verification
 
-- Each MCP add-on: Supervisor shows it running; `tools/list` answers on its url.
+- Each MCP add-on: Supervisor shows it running; the agent's rollout strip shows it green.
 - Agent UI (ingress): all MCPs `connected`; device link up; end-to-end voice
   ("okay nabu" → tool → TTS on the reSpeaker); screen push redraws the reTerminal.

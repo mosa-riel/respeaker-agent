@@ -1,0 +1,16 @@
+# reSpeaker XVF3800 + XIAO ESP32S3 — HA Assist satellite
+#
+# This is the config flashed to the device. It pulls FormatBCE's full satellite
+# config as a remote package, pinned to a commit for reproducibility.
+# A verbatim snapshot of that pinned file lives next to this one as
+# `upstream-snapshot.yaml` (read-only reference — do not flash it directly).
+#
+# Secrets (wifi_ssid, wifi_password, ota_password) live in the ESPHome add-on's
+# secrets.yaml on HA — never in this repo. See secrets.yaml.example.
+
+packages:
+  respeaker:
+    url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
+    ref: 1a84bbe204f23dc0a7678095e8d501b5c0e3c0b1
+    files: [config/respeaker-xvf-satellite-example.yaml]
+    refresh: 0s

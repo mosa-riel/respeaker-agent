@@ -1,7 +1,7 @@
 """Home Assistant add-on entrypoint for the reSpeaker agent.
 
 Bridges HA add-on conventions to the app:
-  - maps the `mistral_api_key` option → the LLM/STT/TTS secret env vars the app reads;
+  - maps the `api_key` option → the LLM/STT/TTS secret env vars the app reads;
   - seeds a persistent /data/config.json from the shipped deployment config on first
     boot (user options applied once), then always enforces the ingress network bind;
   - turns on ingress mode, then launches the normal CLI entrypoint.
@@ -81,7 +81,8 @@ def main() -> None:
     opts = _load(OPTIONS)
 
     # API key → secret env (Secrets.from_env reads these; STT/TTS fall back to LLM key).
-    key = opts.get("mistral_api_key") or ""
+    # Provider-agnostic: any OpenAI-compatible endpoint's key (configured in config.json).
+    key = opts.get("api_key") or opts.get("mistral_api_key") or ""
     if key:
         os.environ["LLM_API_KEY"] = key
         os.environ.setdefault("STT_API_KEY", key)

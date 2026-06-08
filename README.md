@@ -1,39 +1,61 @@
 # reSpeaker Agent
 
-Custom voice agent for the reSpeaker XVF3800 — the path to owning the whole stack:
-talk to the device directly, fan tools in from multiple MCP servers, and (later)
-render custom screens to the reTerminal e-paper. Replaces the fragile nested HA
-integration chain.
+Self-owned voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3**. Talks to the device
+directly over the ESPHome native API, runs an LLM tool-calling loop fed by **multiple MCP
+servers**, renders custom screens to a **reTerminal E1001 e-paper**, and exposes a local
+web UI with a live trace monitor. Replaces the fragile nested Home-Assistant integration
+chain.
 
-**Status:** Phase 1 — connect to the device + a local web UI for status/config.
+The LLM/STT/TTS endpoints are **OpenAI-compatible** — the base URLs and model ids are
+config, so any compatible provider (hosted or self-hosted) works.
 
-## Stack
-- Python ≥3.11, `aioesphomeapi` (ESPHome native API), FastAPI + a no-build static UI.
-- Styling lifted from `mosa.cloud.sources/commander`.
+## Deploy as Home Assistant add-ons (recommended)
 
-For a full orientation (architecture, phases, conventions) read **`CLAUDE.md`** and
-**`docs/PLAN.md`**.
+The agent and each MCP server are packaged as **HA add-ons**, each in its own repo.
+Install on a Home Assistant OS host:
 
-## Run (laptop first)
+1. **Settings → Add-ons → ⋮ → Repositories**, add each (no leading spaces):
+   ```
+   https://github.com/mosa-riel/respeaker-agent
+   https://github.com/mosa-riel/mcp-funbox
+   https://github.com/mosa-riel/mcp-websearch
+   https://github.com/mosa-riel/mcp-screen
+   https://github.com/mosa-riel/mcp-homeassistant
+   ```
+2. Install the MCP add-ons, then this one. Set the agent's **`api_key`** (your
+   OpenAI-compatible provider key) in its Configuration tab. Start it.
+3. Open the agent from the HA sidebar (ingress). The rollout strip shows each MCP up.
+
+The agent reaches the MCP add-ons over HTTP; it **auto-discovers** their hostnames via
+the Supervisor API, so no urls need editing. See
+[docs/reference/deployment.md](docs/reference/deployment.md).
+
+## Run locally (dev)
+
 ```bash
 cp .env.example .env            # device PSK (if any) + LLM_API_KEY
 cp config.example.json config.json
 make run                        # http://127.0.0.1:8730  (or: uv run respeaker-agent)
-make sbom                       # regenerate sbom.json (also served at GET /api/sbom)
 ```
+For local dev, run each MCP repo's `server.py` and point the `mcp_servers` urls at
+`http://127.0.0.1:<port>/mcp`.
 
 ## Config & secrets
 - **`config.json`** — non-secret settings, editable from the UI (device host/port,
-  LLM base URL/model, web bind, MCP servers). Gitignored.
-- **`.env`** — secrets only (`RESPEAKER_NOISE_PSK`, `LLM_API_KEY`). Never written to
-  disk by the app, never returned by the API/UI. Gitignored.
+  LLM/STT/TTS base URLs + models, MCP servers). Gitignored.
+- **`.env`** — secrets only (`RESPEAKER_NOISE_PSK`, `LLM_API_KEY`; STT/TTS keys fall
+  back to `LLM_API_KEY`). Never written to disk by the app, never returned by the API/UI.
 
-## Roadmap
-1. **Phase 1 (now):** device link + status/config UI.
-2. **Phase 2:** voice flow — wake event → mic audio → STT → LLM(MCP tools) → TTS.
-3. **Phase 3:** `show_screen` tool → render + push to reTerminal e-paper.
-4. **Phase 4:** multi-MCP config UI; package as HA add-on.
+## Devices (ESPHome)
 
-## Security
-The web UI edits config and binds a port; MCP servers execute tools. Keep
-`web_host=127.0.0.1` unless you add auth. See `docs/` for the security review.
+Flashing configs for both devices live in [`devices/`](devices/):
+- `devices/respeaker-xvf3800/` — the voice satellite.
+- `devices/reterminal-e1001/` — the e-paper screen (point its `online_image` url at the
+  screen MCP's PNG host).
+
+Copy each `secrets.yaml.example` → `secrets.yaml` (wifi + OTA), then
+`uvx esphome run <device>.yaml`.
+
+## More
+Architecture, phases, and conventions: [`CLAUDE.md`](CLAUDE.md) and
+[`docs/PLAN.md`](docs/PLAN.md). Security review: [`docs/reference/security.md`](docs/reference/security.md).
