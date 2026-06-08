@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import audio
@@ -33,6 +34,12 @@ from .voice import VoicePipeline
 
 STATIC_DIR = Path(__file__).parent / "static"
 SBOM_PATH = Path(__file__).resolve().parents[2] / "sbom.json"  # repo root
+
+# Running behind Home Assistant ingress (set by the add-on). HA proxies requests from
+# 172.30.32.2 and sends X-Ingress-Path; under host_network the ingress port is also on
+# the LAN, so when ingress is on we reject any client that isn't the ingress proxy.
+INGRESS = os.getenv("RESPEAKER_INGRESS", "").lower() in ("1", "true", "yes")
+INGRESS_PROXY_IP = "172.30.32.2"
 
 
 @asynccontextmanager
@@ -91,6 +98,15 @@ app = FastAPI(title="reSpeaker Agent", lifespan=lifespan)
 
 
 @app.middleware("http")
+async def _ingress_guard(request: Request, call_next):
+    # Under ingress the port is LAN-reachable (host_network), so only the HA ingress
+    # proxy may talk to us — everything else is unauthenticated and must be refused.
+    if INGRESS and (request.client is None or request.client.host != INGRESS_PROXY_IP):
+        return Response("forbidden", status_code=403)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _no_cache(request: Request, call_next):
     # Local dev tool — never let the browser cache the UI (stale CSS/JS was biting).
     resp = await call_next(request)
@@ -103,6 +119,35 @@ async def status() -> JSONResponse:
     data = app.state.link.status()
     data["voice"] = app.state.voice.status()
     return JSONResponse(data)
+
+
+@app.get("/api/health")
+async def health() -> JSONResponse:
+    """Rollout status — one row per app (agent + device + each MCP). Powers the UI's
+    health strip; the single 'are the apps up' view inside HA (alongside Supervisor's
+    own add-on page)."""
+    settings: Settings = app.state.settings
+    mcp_status = app.state.mcp.status
+    link = app.state.link.status()
+    apps = [
+        {"name": "agent", "kind": "agent", "up": True, "detail": "running"},
+        {
+            "name": "device",
+            "kind": "device",
+            "up": bool(link.get("connected")),
+            "detail": (link.get("device_info") or {}).get("name") or link.get("host") or settings.device_host,
+        },
+    ]
+    for srv in settings.mcp_servers:
+        st = mcp_status.get(srv.name, {})
+        if not srv.enabled:
+            detail = "disabled"
+        elif st.get("connected"):
+            detail = f"{len(st.get('tools', []))} tools"
+        else:
+            detail = st.get("error") or "down"
+        apps.append({"name": srv.name, "kind": "mcp", "up": bool(srv.enabled and st.get("connected")), "detail": detail})
+    return JSONResponse({"apps": apps})
 
 
 @app.get("/api/trace")
@@ -368,6 +413,25 @@ async def remove_mcp(name: str) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
     settings.save()
     return JSONResponse({"ok": True, "note": "Removed. Restart the agent to apply."})
+
+
+@app.get("/")
+async def index(request: Request) -> HTMLResponse:
+    # Serve index.html, made ingress-aware. HA sends X-Ingress-Path (the URL prefix the
+    # browser uses); absent → "" → behaves exactly as before for local dev. A tiny shim
+    # rewrites root-relative fetch()/EventSource() URLs to sit under that prefix, so the
+    # existing absolute "/api/..." calls keep working without per-call edits.
+    prefix = request.headers.get("X-Ingress-Path", "") if INGRESS else ""
+    html = (STATIC_DIR / "index.html").read_text()
+    html = html.replace('href="/app.css"', f'href="{prefix}/app.css"')
+    shim = (
+        "<script>(function(){var P=%s;if(!P)return;"
+        'var f=window.fetch;window.fetch=function(u,o){if(typeof u==="string"&&u[0]==="/")u=P+u;return f(u,o);};'
+        'var E=window.EventSource;window.EventSource=function(u,o){if(typeof u==="string"&&u[0]==="/")u=P+u;return new E(u,o);};'
+        "})();</script>"
+    ) % json.dumps(prefix)
+    html = html.replace("</head>", shim + "\n</head>", 1)
+    return HTMLResponse(html)
 
 
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

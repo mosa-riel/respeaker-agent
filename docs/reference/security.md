@@ -64,9 +64,42 @@ launching (future), and untrusted data from the device + LLM.
 Dependencies are now pinned via **`uv.lock`** (was a backlog item); SBOM at
 `sbom.json`. See [open-source.md](open-source.md).
 
+### HA add-ons + MCP-over-HTTP split (step 09) — reviewed
+
+See [deployment.md](deployment.md) for the architecture.
+
+- **The "bind off `127.0.0.1`" gate is now satisfied — via ingress, not auth code.** The
+  agent add-on serves its UI through **HA ingress** (`ingress: true`), which is
+  authenticated by the HA frontend; no separate LAN port and no in-app auth needed.
+  Because `host_network: true` also exposes `:8099` on the LAN, a guard middleware
+  (`RESPEAKER_INGRESS=1`) **rejects every client except the ingress proxy `172.30.32.2`
+  (403)**. Net: unauthenticated LAN access to `/api/*` is closed in the deployed add-on.
+  *(Running outside an add-on still binds `127.0.0.1` by default — unchanged.)*
+- **Secrets** still env-only: `addon-run.py` reads the `mistral_api_key` add-on option
+  (HA stores it as a `password` type) and exports it as `LLM/STT/TTS_API_KEY`; it is
+  **never** written to `config.json` (which lives in `/data`). Confirmed.
+- **MCP transport security disabled — bounded.** Each MCP server sets
+  `enable_dns_rebinding_protection=False` (the SDK guard is localhost-only with no glob
+  and 421s otherwise). DNS-rebinding protection defends *browsers*; these are
+  server↔server endpoints. funbox/websearch/ha-mcp are **bridged, internal-only** (no
+  LAN port). `mcp-screen` publishes only its **PNG host** (`:8799`) to the LAN — a static
+  image, no secrets, no MCP endpoint. The MCP endpoints themselves are never LAN-exposed.
+- **HA-MCP credential via `SUPERVISOR_TOKEN`** (default) replaces the hand-made
+  long-lived token: `homeassistant_api: true` injects a token the Supervisor scopes by
+  `hassio_role`, reachable only through the core proxy. A pasted long-lived token remains
+  an explicit fallback option. Either way the token is not in `config.json`.
+- **`call_service` domain allowlist** (admin token can call any service — real risk with
+  web-search prompt injection) is **still backlog**, now to be implemented inside
+  `mcp-homeassistant`. The supervisor-token role-scoping narrows but does not replace it.
+- MCP url servers added via `POST /api/mcp` remain url-only (no subprocess); the
+  per-server connection now runs in its own task (no behavioural auth change).
+
 ## Hardening gates
 
-- **Bind off `127.0.0.1`:** auth + CSRF + same-origin + CORS lockdown on `/api/*` writes.
+- **Bind off `127.0.0.1`:** ✅ satisfied in the add-on via **ingress + 172.30.32.2-only
+  guard**. For any *non-ingress* off-localhost bind, still require auth + CSRF + CORS.
 - **Launch MCP subprocesses:** never take `command`/`args` from UI; server-side
-  allowlist of approved servers; consider sandboxing.
+  allowlist of approved servers; consider sandboxing. *(Deployed MCPs are now separate
+  add-ons reached by url — no subprocess launched by the agent at all.)*
+- **HA `call_service`:** add a domain/service allowlist in `mcp-homeassistant`.
 - **Prod:** SBOM diffing in CI; fixed config dir; self-hosted fonts.

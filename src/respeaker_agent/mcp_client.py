@@ -10,17 +10,21 @@ Security: stdio servers run a subprocess, so their `command`/`args` come only fr
 Secrets (e.g. the HA token) are inherited from the agent's own environment, not
 stored in `config.json`. See docs/reference/security.md.
 
-Lifecycle note: contexts are entered on startup and closed on shutdown within the
-same task (the FastAPI lifespan), satisfying anyio's same-task cancellation rule.
-Adding/removing a server via the API rewrites config and requires a restart to
-connect — MCP sessions are not hot-swapped from a request task.
+Lifecycle note: each server's connection (transport client + ClientSession) is owned by
+its OWN asyncio task and kept open there until shutdown. This is required for the
+streamable-HTTP transport, whose internal anyio task group must be entered AND exited in
+the same task — stashing these context managers on a shared AsyncExitStack and unwinding
+them piecemeal raises "exit cancel scope in a different task". Tool calls are issued from
+other tasks (the agent loop); that's fine — only the context manager enter/exit is
+task-bound, not the session method calls. Adding/removing a server via the API rewrites
+config and requires a restart to connect.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -38,27 +42,72 @@ class McpManager:
         self._settings = settings
         self._trace = trace
         self._registry = registry
-        self._stack = AsyncExitStack()
         self._sessions: dict[str, ClientSession] = {}
+        self._tasks: list[asyncio.Task] = []
+        self._shutdown = asyncio.Event()
         # server name -> {"connected": bool, "tools": [names], "error": str|None}
         self.status: dict[str, dict[str, Any]] = {}
 
     async def start(self) -> None:
+        # Spawn one task per server; each owns its connection and signals `ready` once it
+        # has connected (and registered its tools) or failed. Wait for all to settle so
+        # the tool registry is populated before the agent runs — but one bad/slow server
+        # can't kill the rest (its task isolates the failure).
+        waits = []
         for srv in self._settings.mcp_servers:
             if not srv.enabled:
                 self.status[srv.name] = {"connected": False, "tools": [], "error": "disabled"}
                 continue
-            try:
-                await self._connect(srv)
-            except Exception as err:  # noqa: BLE001 - one bad server mustn't kill the rest
-                msg = _safe(err)
-                self.status[srv.name] = {"connected": False, "tools": [], "error": msg}
-                self._trace.emit("error", f"MCP '{srv.name}' connect failed: {msg}", level="error")
-                _LOGGER.exception("MCP connect failed: %s", srv.name)
+            ready = asyncio.Event()
+            self._tasks.append(asyncio.create_task(self._serve(srv, ready), name=f"mcp:{srv.name}"))
+            waits.append(ready.wait())
+        if waits:
+            await asyncio.gather(*waits)
 
     async def stop(self) -> None:
-        await self._stack.aclose()
+        self._shutdown.set()  # let each server task exit its `async with` cleanly
+        if self._tasks:
+            _done, pending = await asyncio.wait(self._tasks, timeout=5)
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
         self._sessions.clear()
+
+    async def _serve(self, srv: McpServer, ready: asyncio.Event) -> None:
+        """Own one server's connection for the process lifetime. The full context-manager
+        chain is entered and exited in THIS task (anyio requirement for streamable-HTTP)."""
+        try:
+            if srv.transport == "http":
+                from mcp.client.streamable_http import streamablehttp_client
+
+                async with streamablehttp_client(srv.url) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await self._register(srv, session)
+                        ready.set()
+                        await self._shutdown.wait()
+            else:
+                params = StdioServerParameters(
+                    command=srv.command,
+                    args=list(srv.args),
+                    # Inherit the agent env (so .env secrets like HOMEASSISTANT_TOKEN reach
+                    # the subprocess), with the server's non-secret env layered on top.
+                    env={**os.environ, **srv.env},
+                )
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await self._register(srv, session)
+                        ready.set()
+                        await self._shutdown.wait()
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - one bad server mustn't kill the rest
+            msg = _safe(err)
+            self.status[srv.name] = {"connected": False, "tools": [], "error": msg}
+            self._trace.emit("error", f"MCP '{srv.name}' connect failed: {msg}", level="error")
+            _LOGGER.exception("MCP connect failed: %s", srv.name)
+        finally:
+            ready.set()  # never leave start() waiting, even on early failure
 
     def sources_summary(self) -> str | None:
         """A compact per-server tool map for the prompt: which functions each MCP
@@ -83,22 +132,8 @@ class McpManager:
             raise RuntimeError(f"MCP server not connected: {server}")
         return _result_to_json(await session.call_tool(tool, args))
 
-    async def _connect(self, srv: McpServer) -> None:
-        if srv.transport == "http":
-            from mcp.client.streamable_http import streamablehttp_client
-
-            read, write, _ = await self._stack.enter_async_context(streamablehttp_client(srv.url))
-        else:
-            params = StdioServerParameters(
-                command=srv.command,
-                args=list(srv.args),
-                # Inherit the agent env (so .env secrets like HOMEASSISTANT_TOKEN reach
-                # the subprocess), with the server's non-secret env layered on top.
-                env={**os.environ, **srv.env},
-            )
-            read, write = await self._stack.enter_async_context(stdio_client(params))
-
-        session = await self._stack.enter_async_context(ClientSession(read, write))
+    async def _register(self, srv: McpServer, session: ClientSession) -> None:
+        """Initialize the session, fetch its tools, and register the enabled ones."""
         await session.initialize()
         resp = await session.list_tools()
         enabled = set(srv.enabled_tools)  # empty = all enabled
@@ -159,6 +194,10 @@ def _slug(name: str) -> str:
     return "".join(c if (c.isalnum() or c in "-_") else "_" for c in name)
 
 
-def _safe(err: Exception) -> str:
+def _safe(err: BaseException) -> str:
+    # streamable-HTTP wraps the real cause (e.g. a DNS/connect error) in an
+    # ExceptionGroup from its internal task group — unwrap to the leaf for a useful message.
+    while isinstance(err, BaseExceptionGroup) and err.exceptions:
+        err = err.exceptions[0]
     msg = str(err) or err.__class__.__name__
     return msg.splitlines()[0][:200]

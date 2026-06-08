@@ -48,9 +48,9 @@ agent service (Python, asyncio)
 |---|---|---|
 | 1 | Device link + web UI + live trace monitor | ✅ done (step 01) |
 | 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | ✅ working on hardware (server-VAD, FLAC-URL TTS, follow-up + chime, flow-graph UI, multi-MCP) — see steps 02–08 |
-| 3 | `show_screen` → render (Pillow) + push to reTerminal e-paper | 🔶 reTerminal flashed (ESPHome) + push proven; screen-MCP started (see below) |
-| 4 | MCP client layer + multi-server config UI; tool dispatch | (overlaps p2) |
-| 5 | Package as HA add-on (Docker); deploy on the HA host | |
+| 3 | `show_screen` → render (Pillow) + push to reTerminal e-paper | 🔶 reTerminal flashed (ESPHome) + push proven; screen-MCP built as own repo/add-on (`mcp-screen`) |
+| 4 | MCP client layer + multi-server config UI; tool dispatch | ✅ (overlaps p2); MCPs now HTTP, one repo each |
+| 5 | Package as HA add-ons; deploy on the HA host | 🔶 in progress — agent + 4 MCP add-ons built & verified locally; HA-host install pending. See [steps/09](steps/09-ha-addons-and-mcp-split.md) + [reference/deployment.md](reference/deployment.md) |
 
 ### Phase 2 notes
 - **TTS = Mistral Voxtral TTS** (`voxtral-mini-tts-2603`), not Piper — same
@@ -77,11 +77,11 @@ agent service (Python, asyncio)
   hosts a rendered PNG; calling `refresh_screen` (via `aioesphomeapi.execute_service`)
   makes the device fetch + redraw. Agent-initiated, near-instant (e-paper refresh
   ~2-5s, no video).
-- **Architecture:** a dedicated **screen-MCP** (`scripts/screen_mcp.py`) owns this —
-  tools `show_text`/`show_image`/`clear_screen` render the PNG, host it (:8790), and
-  trigger the device. The agent just calls the tool. Becomes a standalone HTTP MCP
-  pod under the containerization plan. (Wiring TODO: point the device's online_image
-  url at the screen-MCP + register it in config.)
+- **Architecture:** a dedicated **screen-MCP** owns this — tools
+  `show_text`/`show_image`/`clear_screen` render the PNG, host it (:8799), and trigger
+  the device. The agent just calls the tool. Now its **own repo `mcp-screen`** running as
+  a standalone streamable-HTTP MCP / HA add-on (step 09). Remaining: reflash the device's
+  online_image url → `http://<ha-host-ip>:8799/screen.png`.
 
 ## Security gates (enforced)
 

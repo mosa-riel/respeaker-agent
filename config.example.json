@@ -18,9 +18,9 @@
   "mcp_servers": [
     {
       "name": "home-assistant",
-      "command": "uvx",
-      "args": ["ha-mcp@latest"],
-      "url": "",
+      "command": "",
+      "args": [],
+      "url": "http://local-mcp-homeassistant:8086/mcp",
       "enabled": true,
       "enabled_tools": [
         "ha_search_entities",
@@ -34,16 +34,23 @@
     },
     {
       "name": "funbox",
-      "command": "uv",
-      "args": ["run", "python", "scripts/funbox_mcp.py"],
-      "url": "",
+      "command": "",
+      "args": [],
+      "url": "http://local-mcp-funbox:8785/mcp",
       "enabled": true
     },
     {
       "name": "websearch",
-      "command": "uv",
-      "args": ["run", "python", "scripts/websearch_mcp.py"],
-      "url": "",
+      "command": "",
+      "args": [],
+      "url": "http://local-mcp-websearch:8786/mcp",
+      "enabled": true
+    },
+    {
+      "name": "screen",
+      "command": "",
+      "args": [],
+      "url": "http://local-mcp-screen:8788/mcp",
       "enabled": true
     }
   ]

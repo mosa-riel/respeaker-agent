@@ -18,6 +18,9 @@
 	</header>
 
 	<main class="app-main">
+		<!-- Rollout status strip — agent + device + each MCP add-on (one dot each) -->
+		<div class="apps-strip" id="apps-strip" title="rollout status — green = up"></div>
+
 		<!-- Live voice pipeline — flow-graph -->
 		<section class="flowmap-wrap">
 			<div class="flowmap-head">
@@ -202,6 +205,16 @@
 					`<div class="detail-row"><div class="detail-text"><span class="detail-label">${esc(k)}</span>
 					 <span class="detail-value">${esc(v)}</span></div></div>`).join('');
 			} catch { $('conn').className = 'status-pill err'; $('conn').innerHTML = '<span class="dot"></span> agent unreachable'; }
+			renderHealth();
+		}
+
+		/* ── rollout status strip ── */
+		async function renderHealth() {
+			try {
+				const h = await (await fetch('/api/health')).json();
+				$('apps-strip').innerHTML = (h.apps || []).map(a =>
+					`<span class="app-chip ${a.up ? 'ok' : 'down'}" title="${esc(a.detail || '')}"><span class="dot"></span>${esc(a.name)}</span>`).join('');
+			} catch { }
 		}
 
 		/* ── filters ── */
