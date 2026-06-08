@@ -203,8 +203,12 @@ def _result_to_json(result: Any) -> Any:
     return out
 
 
-# Keys that are pure noise to the model (server metadata, HA event context, internal ids).
-_NOISE_KEYS = {"metadata", "context", "last_reported", "last_updated", "unique_id"}
+# Keys that are pure noise to the model: server metadata, HA event context, internal ids,
+# and search pagination/echo fields (keep count/total_matches/has_more/score).
+_NOISE_KEYS = {
+    "metadata", "context", "last_reported", "last_updated", "unique_id",
+    "offset", "limit", "next_offset", "search_type", "domain_filter", "match_type",
+}
 
 
 def _trim(obj: Any) -> Any:
