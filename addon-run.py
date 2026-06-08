@@ -66,8 +66,6 @@ def main() -> None:
         f"[addon-run] applied from add-on options: device_host={cfg.get('device_host')!r} "
         f"tts_audio_host={cfg.get('tts_audio_host')!r}"
     )
-    # Rewrite MCP urls to the real (discovered) add-on hostnames.
-    _discover_mcp_urls(cfg)
     if first_boot:
         # Seed a few user-facing fields from options once; afterwards the UI owns them.
         for k in ("tts_voice_id", "llm_model"):
