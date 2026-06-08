@@ -116,12 +116,14 @@ class AgentLoop:
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
         # Retry transient rate-limits (429) / overloads (5xx) with backoff — the
         # provider clears them in a second or two; don't fail the whole turn.
-        attempts = 4
+        attempts = 6
         for attempt in range(attempts):
             try:
                 resp = await cli.post(url, json=body, headers=headers)
                 if resp.status_code in (429, 500, 502, 503) and attempt < attempts - 1:
-                    delay = _retry_after(resp) or (0.6 * (2 ** attempt))
+                    # Broader backoff for tight free-tier RPS limits: 1,2,4,8,16s (capped),
+                    # unless the provider sends a Retry-After.
+                    delay = _retry_after(resp) or min(16.0, 2 ** attempt)
                     self._trace.emit("info", f"LLM {resp.status_code}; retry in {delay:.1f}s", level="warn")
                     await asyncio.sleep(delay)
                     continue
