@@ -60,9 +60,24 @@ class AgentLoop:
         # follow-ups like "ja" / "doe maar" keep context. `context` = live home
         # overview injected fresh each turn so it never goes stale (phase 4).
         system = self._s.system_prompt
+        # Tool-usage rules appended at RUNTIME so they always apply, even if a stored
+        # system_prompt (frozen in config) is out of date.
+        system += (
+            "\n\n=== TOOLGEBRUIK ===\n"
+            "- Apparaten in een ruimte (bv. 'alle lampen in de keuken'): roep "
+            "ha_search_entities aan met area_filter=<ruimtenaam> én domain_filter (bv. "
+            "'light'). Gebruik area_filter — zet GEEN losse woorden als 'lamp' in query "
+            "(dat geeft fuzzy ruis en verkeerde apparaten). Bedien dan ALLE treffers.\n"
+            "- ha_call_service: entity_id is precies ÉÉN string. Voor meerdere apparaten "
+            "doe je parallelle calls (één per entity_id) — geef NOOIT een lijst.\n"
+            "- ha_search_entities geeft de state (aan/uit) al terug. Roep ha_get_state "
+            "NIET nog eens aan voor aan/uit — alleen als je extra details/attributen nodig "
+            "hebt.\n"
+            "- Negeer zoektreffers waarvan entity_id/naam de gevraagde ruimte niet bevat."
+        )
         if context:
-            system = (
-                f"{system}\n\n=== TOOL-BRONNEN ===\n{context}\n"
+            system += (
+                f"\n\n=== TOOL-BRONNEN ===\n{context}\n"
                 "Kies de juiste tool per vraag. Je kent de apparaten NIET uit je hoofd: "
                 "gebruik de zoek-/lijst-tool van home-assistant om het juiste apparaat "
                 "+ entity_id te vinden, en de staat-tool voor de actuele staat. Verzin "

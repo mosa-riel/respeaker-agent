@@ -291,6 +291,11 @@ def _lines(obj: Any) -> str:
         for k, v in obj.items():
             if isinstance(v, list) and v and _flat_rows(v):
                 out.append(f"{k}:\n{_table(v)}")
+            elif isinstance(v, dict) and v and all(isinstance(x, dict) for x in v.values()):
+                # keyed record map (e.g. states {entity_id: {...}}) → table with a key column
+                rows = [{"key": rk, **rv} for rk, rv in v.items()]
+                out.append(f"{k}:\n{_table(rows)}" if _flat_rows(rows)
+                           else f"{k}: {json.dumps(v, ensure_ascii=False, default=str)}")
             elif isinstance(v, (dict, list)):
                 out.append(f"{k}: {json.dumps(v, ensure_ascii=False, default=str)}")
             else:
