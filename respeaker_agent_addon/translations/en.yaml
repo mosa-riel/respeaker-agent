@@ -1,0 +1,13 @@
+configuration:
+  api_key:
+    name: API key
+    description: Your OpenAI-compatible provider key (e.g. Mistral). Used for LLM/STT/TTS.
+  device_host:
+    name: reSpeaker IP
+    description: IP address of the reSpeaker device (e.g. 192.168.18.151). Use the IP, not the .local name.
+  tts_audio_host:
+    name: HA host IP (TTS audio)
+    description: This Home Assistant host's LAN IP (e.g. 192.168.18.31). The reSpeaker fetches spoken replies from here.
+  voice_enabled:
+    name: Enable voice
+    description: Take over the reSpeaker's wake-word voice pipeline. Stop Home Assistant's own Assist for this device first.
