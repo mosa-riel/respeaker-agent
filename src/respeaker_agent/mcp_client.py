@@ -203,14 +203,100 @@ def _result_to_json(result: Any) -> Any:
     return out
 
 
+# Keys that are pure noise to the model (server metadata, HA event context, internal ids).
+_NOISE_KEYS = {"metadata", "context", "last_reported", "last_updated", "unique_id"}
+
+
 def _trim(obj: Any) -> Any:
-    """Drop ha-mcp's top-level `metadata` block and unwrap a lone `{"data": …}`."""
+    """Make a tool result read as *what happened*: drop null/empty values and known-noise
+    keys recursively, and unwrap a lone `{"data": …}`. Keeps the model focused on the
+    actual fields (state, results, success, …) instead of `parent_id:null` clutter."""
     if isinstance(obj, dict):
-        if "metadata" in obj and len(obj) > 1:
-            obj = {k: v for k, v in obj.items() if k != "metadata"}
-        if set(obj.keys()) == {"data"}:
-            return obj["data"]
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in _NOISE_KEYS:
+                continue
+            tv = _trim(v)
+            if tv is None or tv == "" or tv == [] or tv == {}:
+                continue
+            out[k] = tv
+        if set(out.keys()) == {"data"}:
+            return out["data"]
+        return out
+    if isinstance(obj, list):
+        return [_trim(x) for x in obj]
     return obj
+
+
+def render_result(obj: Any) -> str:
+    """Compact, LLM-friendly TEXT for a tool result (used in the role:tool message).
+    Lists of flat records → a `a | b` table; objects → `key: value` lines; errors → an
+    `ERROR:` line. Falls back to compact JSON for any shape a table/lines would mangle,
+    so it handles ANY response and is never worse than raw JSON. Never raises."""
+    try:
+        if isinstance(obj, dict):
+            if obj.get("isError"):
+                inner = obj.get("structured", obj.get("content"))
+                return "ERROR: " + (_lines(inner) if inner not in (None, "") else "tool failed")
+            if list(obj.keys()) == ["structured"]:
+                obj = obj["structured"]
+            elif list(obj.keys()) == ["content"]:
+                return str(obj["content"])
+        return _lines(obj)
+    except Exception:  # noqa: BLE001 - rendering must never break a turn
+        return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _scalarish(v: Any) -> bool:
+    return v is None or isinstance(v, (str, int, float, bool))
+
+
+def _cell(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if v is None:
+        return ""
+    return str(v)
+
+
+def _flat_rows(rows: list) -> bool:
+    """True only if every record is a dict whose values are all pipe/newline-safe scalars."""
+    for r in rows:
+        if not isinstance(r, dict):
+            return False
+        for v in r.values():
+            if not _scalarish(v) or "|" in _cell(v) or "\n" in _cell(v):
+                return False
+    return True
+
+
+def _table(rows: list) -> str:
+    cols: list[str] = []
+    for r in rows:
+        for k in r:
+            if k not in cols:
+                cols.append(k)
+    head = " | ".join(cols)
+    body = "\n".join(" | ".join(_cell(r.get(c)) for c in cols) for r in rows)
+    return f"{head}\n{body}"
+
+
+def _lines(obj: Any) -> str:
+    if isinstance(obj, dict):
+        out: list[str] = []
+        for k, v in obj.items():
+            if isinstance(v, list) and v and _flat_rows(v):
+                out.append(f"{k}:\n{_table(v)}")
+            elif isinstance(v, (dict, list)):
+                out.append(f"{k}: {json.dumps(v, ensure_ascii=False, default=str)}")
+            else:
+                out.append(f"{k}: {_cell(v)}")
+        return "\n".join(out)
+    if isinstance(obj, list):
+        if obj and _flat_rows(obj):
+            return _table(obj)
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    return _cell(obj)
 
 
 def _slug(name: str) -> str:

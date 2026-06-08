@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from .config import Secrets, Settings
+from .mcp_client import render_result
 from .tools import ToolRegistry
 from .trace import TraceBus
 
@@ -98,7 +99,9 @@ class AgentLoop:
                     convo.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", ""),
-                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                        # Compact, LLM-friendly text (table for record lists) instead of
+                        # raw JSON — fewer tokens, clearer "what happened".
+                        "content": render_result(result),
                     })
 
             # Ran out of rounds — one closing answer without tools.
