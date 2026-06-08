@@ -8,6 +8,8 @@
 # ingress: the web UI is served through the HA frontend (authenticated, no separate LAN
 #   port). Because host_network also exposes :8099 on the LAN, the app rejects any client
 #   that isn't the ingress proxy (172.30.32.2) — see RESPEAKER_INGRESS in web.py.
+# hassio_api: lets addon-run.py query the Supervisor for the MCP add-ons' real hostnames
+#   (git-repo installs hash the hostname prefix) and self-correct the mcp_servers urls.
 name: reSpeaker Agent
 version: "0.1.0"
 slug: respeaker_agent
@@ -20,6 +22,7 @@ init: true
 boot: auto
 startup: services
 host_network: true
+hassio_api: true
 ingress: true
 ingress_port: 8099
 ingress_stream: true
