@@ -62,6 +62,10 @@ def main() -> None:
     for k in ("device_host", "tts_audio_host"):
         if opts.get(k):
             cfg[k] = opts[k]
+    print(
+        f"[addon-run] applied from add-on options: device_host={cfg.get('device_host')!r} "
+        f"tts_audio_host={cfg.get('tts_audio_host')!r}"
+    )
     # Rewrite MCP urls to the real (discovered) add-on hostnames.
     _discover_mcp_urls(cfg)
     if first_boot:
