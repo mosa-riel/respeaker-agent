@@ -1,9 +1,9 @@
 # Home Assistant add-on manifest for the reSpeaker agent.
 #
 # BRIDGED network (not host_network): this keeps the agent on the Supervisor's internal
-# network, so it can resolve the MCP add-ons by their hostnames (a host_network add-on
-# cannot — that was the whole networking headache). addon-run.py discovers the real MCP
-# hostnames via the Supervisor API (hassio_api).
+# network, so it can RESOLVE the MCP add-ons by their hostnames (a host_network add-on
+# cannot — that was the whole networking headache). Add each MCP in the agent's UI as
+# http://<that add-on's Hostnaam>:<port>/mcp.
 # - The reSpeaker is reached OUTBOUND by IP (set device_host to its IP — bridged has no
 #   mDNS, so its .local name won't resolve).
 # - The device fetches TTS audio FROM the agent, so the agent must hand it a LAN-reachable
@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.2.1"
+version: "0.2.2"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -22,7 +22,6 @@ arch:
 init: true
 boot: auto
 startup: services
-hassio_api: true
 ingress: true
 ingress_port: 8099
 ingress_stream: true

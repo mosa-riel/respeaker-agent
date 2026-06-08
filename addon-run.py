@@ -3,9 +3,10 @@
 Bridges HA add-on conventions to the app:
   - maps the `api_key` option → the LLM/STT/TTS secret env vars the app reads;
   - applies network-critical options (device_host, tts_audio_host) every boot;
-  - discovers each MCP add-on's real internal hostname via the Supervisor API and
-    rewrites the mcp_servers urls (the agent runs bridged, so add-on DNS resolves);
   - seeds /data/config.json on first boot, enforces the ingress bind, then launches.
+
+MCP servers are added by URL in the agent UI (http://<add-on hostname>:<port>/mcp) — the
+agent runs bridged, so it resolves the add-on hostnames.
 
 Secrets live only in env (never written to config.json), same as the .env flow.
 """
@@ -31,55 +32,6 @@ def _load(path: str) -> dict:
         return {}
 
 
-# Our MCP add-ons: config-server-name → (slug suffix, MCP port). Add-on install gives a
-# hashed hostname prefix per repo, so we can't hardcode the url — discover it. The agent
-# runs BRIDGED, so it can both query the Supervisor and resolve add-on hostnames.
-_MCP_ADDONS = {
-    "home-assistant": ("mcp_homeassistant", 8086),
-    "funbox": ("mcp_funbox", 8785),
-    "websearch": ("mcp_websearch", 8786),
-    "screen": ("mcp_screen", 8788),
-}
-
-
-def _discover_mcp_urls(cfg: dict) -> None:
-    """Ask the Supervisor for each installed add-on's real hostname and rewrite the
-    matching mcp_servers url. Best-effort: no-op without SUPERVISOR_TOKEN / off-HA."""
-    import urllib.request
-
-    token = os.getenv("SUPERVISOR_TOKEN")
-    if not token:
-        return
-    try:
-        req = urllib.request.Request(
-            "http://supervisor/addons", headers={"Authorization": f"Bearer {token}"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310 - fixed supervisor host
-            addons = json.load(r).get("data", {}).get("addons", [])
-    except Exception as err:  # noqa: BLE001 - discovery is optional
-        print(f"[addon-run] MCP discovery skipped: {err}")
-        return
-
-    host_by_suffix: dict[str, str] = {}
-    for a in addons:
-        slug, host = a.get("slug", ""), a.get("hostname")
-        if not host:
-            continue
-        for suffix, _port in _MCP_ADDONS.values():
-            if slug == suffix or slug.endswith(f"_{suffix}"):
-                host_by_suffix[suffix] = host
-
-    for srv in cfg.get("mcp_servers", []):
-        entry = _MCP_ADDONS.get(srv.get("name"))
-        if not entry:
-            continue
-        suffix, port = entry
-        host = host_by_suffix.get(suffix)
-        if host:
-            srv["url"] = f"http://{host}:{port}/mcp"
-            print(f"[addon-run] MCP '{srv['name']}' → {srv['url']}")
-
-
 def main() -> None:
     opts = _load(OPTIONS)
 
@@ -90,6 +42,9 @@ def main() -> None:
         os.environ["LLM_API_KEY"] = key
         os.environ.setdefault("STT_API_KEY", key)
         os.environ.setdefault("TTS_API_KEY", key)
+        print(f"[addon-run] api_key applied (len={len(key)}, …{key[-4:]})")
+    else:
+        print("[addon-run] WARNING: no api_key option set — LLM calls will 401")
 
     first_boot = not os.path.exists(CONFIG)
     if first_boot:
