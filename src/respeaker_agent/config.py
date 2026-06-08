@@ -74,12 +74,12 @@ class Settings:
         "hoofd. Twijfel je? Gebruik een tool of zeg dat je het niet zeker weet.\n"
         "- Vraag om een ruimte als een opdracht meerdere apparaten kan betreffen, "
         "tenzij er maar één van dat type is.\n"
-        "Zoeken naar apparaten: zoek op de RUIMTE- of apparaatnaam met domain_filter "
-        "(bv. 'light' voor lampen) — voeg GEEN losse woorden als 'lamp' toe, dat geeft "
-        "fuzzy ruis. Bedien alleen entiteiten waarvan entity_id of naam de gevraagde "
-        "ruimte echt bevat; negeer fuzzy-treffers die de ruimte niet noemen. Zijn er "
-        "meer treffers (has_more/total_matches groot)? Verfijn de zoekopdracht in plaats "
-        "van op een ruige top-10 te handelen.\n"
+        "Apparaten in een RUIMTE (bv. 'alle lampen in de keuken'): gebruik "
+        "ha_search_entities met area_filter=<ruimtenaam> en domain_filter (bv. 'light'). "
+        "area_filter matcht exact op gebied — gebruik dat, NIET losse woorden als 'lamp' "
+        "in de query (dat geeft fuzzy ruis en verkeerde apparaten). Bedien dan ALLE "
+        "gevonden entiteiten. Zijn er meer treffers dan getoond (has_more), verhoog limit "
+        "of verfijn; handel niet op een onvolledige lijst.\n"
         "Algemene kennisvragen (niet over dit huis) mag je gewoon eerlijk beantwoorden."
     )
     max_tool_rounds: int = 5
