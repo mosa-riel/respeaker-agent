@@ -80,24 +80,6 @@ def make_chime_flac(rate: int = 24000) -> bytes:
     return buf.getvalue()
 
 
-def make_wake_chime_wav(rate: int = 24000) -> bytes:
-    """A short ascending two-note 'ready' beep as WAV — played to the host/Bluetooth sink
-    at wake when wake_chime is on (for a device with no usable on-board speaker). Ascending
-    = 'I'm listening' (distinct from the descending end-of-session chime)."""
-    def tone(freq: float, dur: float) -> np.ndarray:
-        t = np.linspace(0, dur, int(rate * dur), endpoint=False)
-        sig = np.sin(2 * np.pi * freq * t)
-        a = int(rate * 0.006)
-        env = np.ones(sig.shape[0])
-        env[:a] = np.linspace(0, 1, a)
-        env[-a:] = np.linspace(1, 0, a)
-        return sig * env
-
-    sig = np.concatenate([tone(587.33, 0.09), tone(880.0, 0.12)])  # D5 → A5, rising
-    samples = np.clip(sig * 0.4 * 32767, -32768, 32767).astype(np.int16)
-    return int16_to_wav_bytes(samples, rate)
-
-
 def flac_duration_seconds(data: bytes) -> float | None:
     """Read clip length from a FLAC STREAMINFO header — no decode, so it's cheap and
     can't delay the response. Returns None if it can't parse."""
