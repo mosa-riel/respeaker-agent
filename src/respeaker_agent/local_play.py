@@ -83,13 +83,20 @@ async def play_pcm_stream(
         return False
 
     assert proc.stdin is not None
+    silence = b"\x00\x00" * int(rate * channels * lead_ms / 1000) if lead_ms > 0 else b""
     try:
-        if lead_ms > 0:
-            proc.stdin.write(b"\x00\x00" * int(rate * channels * lead_ms / 1000))
-            await proc.stdin.drain()
+        first = True
         async for c in chunks:
             if not c:
                 continue
+            if first:
+                # Write the lead silence RIGHT BEFORE the first real audio, not earlier:
+                # a stream (TTS) has ~0.8s time-to-first-chunk, and silence written during
+                # that gap drains and lets the BT sink re-suspend → clips anyway. Contiguous
+                # silence→audio keeps the sink awake straight into the first sample.
+                if silence:
+                    proc.stdin.write(silence)
+                first = False
             proc.stdin.write(c)
             await proc.stdin.drain()
         proc.stdin.close()
