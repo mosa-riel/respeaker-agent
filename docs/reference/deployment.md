@@ -33,6 +33,23 @@ subfolder) can't see the app at the repo root.
   IP** — bridged containers can't do mDNS — so set `reterminal_host` to the device's
   reserved IP, not `reterminal-e1001.local`.
 
+## Audio out + Bluetooth (step 10)
+
+Optional: play TTS on a host speaker (incl. a Bluetooth A2DP speaker) instead of the
+reSpeaker's own speaker. The agent add-on grants the host access for it:
+
+- **`audio: true`** maps the Supervisor PulseAudio server in (`PULSE_SERVER`) so `paplay`
+  reaches host sinks — incl. `bluez_sink.<MAC>.a2dp_sink` once a speaker is connected.
+- **`host_dbus: true`** lets the optional `bluetooth_control` tools drive the host BlueZ
+  adapter via `bluetoothctl`. Image installs `bluez` + `pulseaudio-utils`.
+- Add-on options: **`audio_sink`** (sink name; empty = device speaker; `"default"` = host
+  default) and **`bluetooth_control`** (expose the BT tools; off by default). Both
+  enforced every boot by `addon-run.py`.
+
+Pairing can be done once on the HA OS host (Terminal add-on: `bluetoothctl pair/trust/
+connect`), or — with `bluetooth_control` on — by voice/UI via the agent. `audio_sink` is
+auto-set on a successful `bluetooth_connect`; save config to persist across restart.
+
 ## MCP hostname auto-discovery
 
 Git-repo add-ons get a **hashed DNS hostname prefix** (e.g. `abc123-mcp-funbox`), not

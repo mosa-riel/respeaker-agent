@@ -62,9 +62,14 @@ def main() -> None:
     for k in ("device_host", "tts_audio_host"):
         if opts.get(k):
             cfg[k] = opts[k]
+    # Audio-out routing, enforced every boot from the add-on options page: which sink TTS
+    # plays to, and whether the host bluetoothctl tools are exposed.
+    cfg["audio_sink"] = opts.get("audio_sink", "") or ""
+    cfg["bluetooth_control"] = bool(opts.get("bluetooth_control", False))
     print(
         f"[addon-run] applied from add-on options: device_host={cfg.get('device_host')!r} "
-        f"tts_audio_host={cfg.get('tts_audio_host')!r}"
+        f"tts_audio_host={cfg.get('tts_audio_host')!r} audio_sink={cfg.get('audio_sink')!r} "
+        f"bluetooth_control={cfg.get('bluetooth_control')}"
     )
     if first_boot:
         # Seed a few user-facing fields from options once; afterwards the UI owns them.

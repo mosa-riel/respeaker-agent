@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.2.11"
+version: "0.3.0"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -22,6 +22,12 @@ arch:
 init: true
 boot: auto
 startup: services
+# audio: maps the Supervisor PulseAudio server in (PULSE_SERVER) so `paplay` can reach a
+#   host sink — incl. a Bluetooth A2DP `bluez_sink.*` once the speaker is connected.
+# host_dbus: lets the optional `bluetooth_control` tools drive the host BlueZ adapter via
+#   `bluetoothctl` (pair/connect). Leave both off if you only play to the device speaker.
+audio: true
+host_dbus: true
 ingress: true
 ingress_port: 8099
 ingress_stream: true
@@ -35,8 +41,16 @@ options:
   device_host: 192.168.18.151
   tts_audio_host: 192.168.18.31
   voice_enabled: true
+  audio_sink: ""
+  bluetooth_control: false
 schema:
   api_key: "password?"
   device_host: str
   tts_audio_host: str
   voice_enabled: bool
+  # PulseAudio sink for TTS out; empty = reSpeaker device speaker. A connected BT speaker
+  # is bluez_sink.<MAC_with_underscores>.a2dp_sink. "default" = host default sink.
+  audio_sink: str?
+  # Expose locked-down bluetoothctl tools (scan/list/connect) so the agent can re-pair a
+  # speaker. Needs host_dbus (above). Off by default.
+  bluetooth_control: bool

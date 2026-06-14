@@ -139,6 +139,18 @@ class Settings:
     # agent runs bridged (e.g. a HA add-on), its own IP isn't LAN-reachable — set this to
     # the host's LAN IP and publish tts_audio_port so the device can reach it.
     tts_audio_host: str = ""
+    # Local audio out: when set, the agent plays TTS to this PulseAudio/PipeWire SINK
+    # on the host (e.g. a paired Bluetooth speaker `bluez_sink.<MAC>.a2dp_sink`)
+    # instead of streaming it to the reSpeaker device's own speaker. Empty = device
+    # speaker (default). The reSpeaker mic is still the input either way. Follow-up
+    # (mic re-open without wake word) is driven by the device's announce path, so it's
+    # disabled in local-sink mode — wake the device per turn. "default" = host default sink.
+    audio_sink: str = ""
+    # Host Bluetooth control: OPT-IN. Exposes locked-down `bluetoothctl` agent tools
+    # (scan/list/connect/disconnect) so you can re-pair a speaker by voice/UI. The
+    # binary is fixed, the sub-command allowlisted, and the only free arg is a
+    # regex-validated MAC — no user string ever reaches a shell. See bluetooth.py.
+    bluetooth_control: bool = False
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

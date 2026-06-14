@@ -27,6 +27,7 @@ from .home_context import HomeContext
 from .mcp_client import McpManager
 from .stt import STTClient
 from .tools import demo_registry
+from .bluetooth import bluetooth_tools
 from .trace import TraceBus
 from .tts import make_tts
 from .tts_server import TTSAudioServer
@@ -49,6 +50,8 @@ async def lifespan(app: FastAPI):
     trace = TraceBus()
     link = DeviceLink(settings, secrets, trace)
     tools = demo_registry()
+    for t in bluetooth_tools(settings, trace):  # host BT control (opt-in; empty otherwise)
+        tools.add(t)
     app.state.settings = settings
     app.state.secrets = secrets
     app.state.trace = trace

@@ -26,6 +26,7 @@ import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
 from .audio import flac_duration_seconds
+from .local_play import play_pcm_stream
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
 from .stt import STTClient
@@ -233,6 +234,17 @@ class VoicePipeline:
         self.last_activity = "praten…"
         assert self._cli is not None
         self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
+        if self._s.audio_sink:
+            # Local-sink mode: stream TTS straight to a host PulseAudio sink (e.g. a
+            # paired Bluetooth speaker) instead of the device. We AWAIT real playback,
+            # so no duration guessing. Follow-up (mic re-open) rides the device announce
+            # path, which we skip here — so this turn ends and the user wakes again.
+            self._trace.emit("tts", result.text, direction="out", data={"sink": self._s.audio_sink})
+            await play_pcm_stream(self._tts.synth_stream(result.text), self._s.audio_sink, self._s.tts_out_rate, self._trace)
+            self._event(_EVT.VOICE_ASSISTANT_TTS_END)
+            self._run_end()
+            self.last_activity = "klaar"
+            return True
         # This firmware plays TTS via its media_player fetching a URL ("No url in
         # TTS_END event" otherwise) and decodes by type — its pipeline is FLAC and it
         # rejects WAV. Ask the engine for the configured format, publish it on the LAN

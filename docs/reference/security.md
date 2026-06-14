@@ -94,6 +94,30 @@ See [deployment.md](deployment.md) for the architecture.
 - MCP url servers added via `POST /api/mcp` remain url-only (no subprocess); the
   per-server connection now runs in its own task (no behavioural auth change).
 
+### Host Bluetooth control + local audio sink (step 10)
+
+New capability: the agent can play TTS to a host PulseAudio sink (`audio_sink`, e.g. a
+paired BT speaker) and run `bluetoothctl` to scan/pair/connect/disconnect speakers.
+Both touch the host — reviewed against the project's "never run UI-supplied commands"
+gate:
+
+- **`bluetoothctl` is fenced** (`bluetooth.py`): OPT-IN behind `bluetooth_control`
+  (tools aren't registered otherwise); fixed binary spawned via `create_subprocess_exec`
+  (argv list, **no shell**); the sub-command is allowlisted in code (scan/devices/pair/
+  trust/connect/disconnect/info — callers can't choose); the only free argument is a MAC
+  validated by `_MAC` regex and re-emitted canonical — a non-MAC (`"x; rm -rf /"`) returns
+  an error before any spawn. Every call has a timeout + kill. This satisfies the
+  "server-side allowlist, never UI command/args" gate (same shape as the MCP rule).
+- **`paplay` local playback** (`local_play.py`): fixed binary, argv list, no shell. The
+  only caller value is the sink name, passed as a distinct argv element (`--device <sink>`),
+  never interpolated. PCM fed on stdin is numpy-decoded audio — no exec path.
+- **`audio_sink` writable via config**: a string sink name; worst case is "audio plays to
+  the wrong/nonexistent sink" (paplay errors, traced) — no exec, no bind. Acceptable.
+- **Residual:** `bluetooth_control` is reachable by the LLM tool loop, so web-search /
+  HA prompt-injection could in theory trigger a scan/connect. Bounded — the actions are
+  Bluetooth-pairing only (no data exfil, no code exec), MAC-gated, and off by default.
+  Keep it off unless you want voice/UI speaker switching.
+
 ## Hardening gates
 
 - **Bind off `127.0.0.1`:** ✅ satisfied in the add-on via **ingress + 172.30.32.2-only

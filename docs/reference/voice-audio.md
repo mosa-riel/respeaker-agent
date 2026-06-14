@@ -43,6 +43,22 @@ in `.env` if the local server needs a different/empty key (else it reuses
 - Long replies should be sentence-chunked upstream (voice loop) so the first
   sentence plays while the rest synthesizes.
 
+## Output routing — device speaker vs host sink
+
+By default TTS plays on the **reSpeaker's own speaker**: the engine's encoded audio
+(`tts_voice_format`, FLAC) is served on the LAN audio server and the device fetches the
+URL (`voice.py` → announce path; this also drives follow-up mic re-open).
+
+Set **`audio_sink`** to a PulseAudio/PipeWire sink to play TTS on a **host speaker**
+instead — e.g. a paired Bluetooth A2DP speaker `bluez_sink.<MAC>.a2dp_sink`, or
+`"default"` for the host default. In this mode the voice turn streams int16 PCM straight
+into `paplay --raw` (`local_play.py`) and awaits real playback end. The reSpeaker mic is
+still the input. **Follow-up is disabled** in local-sink mode (it rides the device
+announce path), so wake per turn. As an HA add-on this needs `audio: true` in the
+manifest; see `deployment.md`. Optional `bluetooth_control` exposes locked-down
+`bluetoothctl` agent tools to scan/connect speakers (needs `host_dbus`) — see step 10 +
+`security.md`.
+
 ## Config keys (all non-secret, UI-editable)
 
 `stt_base_url`, `stt_model`, `tts_provider`, `tts_base_url`, `tts_model`,
