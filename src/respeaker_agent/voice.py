@@ -74,6 +74,7 @@ class VoicePipeline:
         self._conversing = False  # in an active follow-up session
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
+        self._gate_ms = 0.0  # ignore mic for this many ms (wake beep bleed) — see _on_audio
         self.attached = False  # subscribed as the device's voice handler
         self.last_activity: str = ""  # last pipeline stage, for the UI
 
@@ -122,7 +123,11 @@ class VoicePipeline:
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
+        self._gate_ms = 0.0
         if self._s.wake_chime and self._s.audio_sink:
+            # Gate the mic for the beep's lifetime (lead silence + ~1s flac + margin) so the
+            # speaker bleed doesn't trip the VAD. Speak after the beep.
+            self._gate_ms = self._s.bt_lead_silence_ms + 1300
             asyncio.create_task(self._play_wake_chime())  # cue on the BT/host speaker; don't block the mic
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         # Enter the listening phase NOW (drives the device's listening LEDs) — the
@@ -136,15 +141,21 @@ class VoicePipeline:
         # end-of-speech (energy VAD), then finalize.
         if self._finalizing or not data:
             return
-        if not self._buf:
-            self._trace.emit("info", "voice: receiving audio…")
-        self._buf.extend(data)
-
         samples = np.frombuffer(data, dtype="<i2")
         if samples.size == 0:
             return
-        rms = math.sqrt(float(np.mean(samples.astype(np.float32) ** 2)))
         dur_ms = samples.size / 16.0  # 16000 samples/s → samples/16 = ms
+        if self._gate_ms > 0:
+            # The wake beep plays on the BT speaker, which sits near the mic; the XVF3800
+            # AEC can't cancel a sink it doesn't drive, so the mic hears the beep. Ignore
+            # the mic for the beep's duration so the VAD doesn't mistake it for speech and
+            # finalize before the user talks.
+            self._gate_ms -= dur_ms
+            return
+        if not self._buf:
+            self._trace.emit("info", "voice: receiving audio…")
+        self._buf.extend(data)
+        rms = math.sqrt(float(np.mean(samples.astype(np.float32) ** 2)))
         self._heard_ms += dur_ms
         if rms > self._s.vad_threshold:
             if not self._speech:
