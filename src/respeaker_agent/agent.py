@@ -201,10 +201,27 @@ class ConversationStore:
         return ent["messages"]
 
     def update(self, conv_id: str, messages: list[dict[str, Any]]) -> None:
-        self._store[conv_id] = {"messages": _trim(messages, self._max), "ts": time.time()}
+        # Store only the conversational gist — not the intra-turn tool churn. See _compact.
+        self._store[conv_id] = {"messages": _trim(_compact_history(messages), self._max), "ts": time.time()}
 
     def clear(self, conv_id: str) -> None:
         self._store.pop(conv_id, None)
+
+
+def _compact_history(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Persist only the conversational gist — user turns + the model's final spoken
+    answers. Intra-turn `tool_calls` / `tool` results (and empty assistants) are dropped:
+    they bloat EVERY future prompt (a failed image-search saga re-sent each turn) and add
+    nothing for follow-up context — the final answer already captures the outcome. The
+    full churn still drives the live loop within a turn; it just isn't remembered."""
+    out: list[dict[str, Any]] = []
+    for m in msgs:
+        role = m.get("role")
+        if role == "user":
+            out.append({"role": "user", "content": m.get("content") or ""})
+        elif role == "assistant" and not m.get("tool_calls") and (m.get("content") or "").strip():
+            out.append({"role": "assistant", "content": m["content"]})
+    return out
 
 
 def _trim(msgs: list[dict[str, Any]], max_messages: int) -> list[dict[str, Any]]:
