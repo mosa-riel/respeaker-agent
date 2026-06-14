@@ -64,7 +64,8 @@ def main() -> None:
     SCALAR_OPTS = (
         "device_host", "device_port", "llm_base_url", "llm_model", "llm_temperature",
         "max_tool_rounds", "home_context_refresh_sec", "stt_base_url", "stt_model",
-        "stt_language", "tts_provider", "tts_base_url", "tts_model", "tts_format",
+        "stt_language", "stt_normalize", "stt_gain_max",
+        "tts_provider", "tts_base_url", "tts_model", "tts_format",
         "tts_pcm_rate", "tts_out_rate", "tts_voice_format", "tts_audio_port",
         "tts_audio_host", "voice_enabled", "voice_followup", "voice_end_chime",
         "device_volume", "vad_threshold", "vad_silence_ms", "vad_max_ms",

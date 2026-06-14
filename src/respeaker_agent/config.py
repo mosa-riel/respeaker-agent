@@ -92,6 +92,12 @@ class Settings:
     stt_base_url: str = "https://api.mistral.ai/v1"
     stt_model: str = "voxtral-mini-latest"
     stt_language: str = "nl"  # force transcription language (no auto-detect drift)
+    # Peak-normalize the captured mic PCM before STT — the XVF3800 far-field output is
+    # often quiet, and Voxtral transcribes quiet audio poorly (wrong language/garbage).
+    # Boost so the loudest sample hits ~95% full-scale, capped at stt_gain_max× so pure
+    # noise/silence isn't blown up. Does NOT fix "hollow" (that's device DSP).
+    stt_normalize: bool = True
+    stt_gain_max: float = 12.0
     # Extra transcription params merged into the request (e.g. {"context_bias":
     # "Keukenkopjes,Eettafel"} to bias vocab/spelling/language). Lists/dicts are
     # JSON-encoded for the multipart form. Overrides the defaults above on conflict.

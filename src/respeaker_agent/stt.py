@@ -29,6 +29,14 @@ class STTClient:
         """pcm16 = raw 16-bit signed mono PCM. Returns the transcript text."""
         language = language or self._s.stt_language
         samples = np.frombuffer(pcm16, dtype="<i2")
+        if self._s.stt_normalize and samples.size:
+            peak = int(np.max(np.abs(samples)))
+            if peak > 0:
+                gain = min(0.95 * 32767 / peak, max(1.0, self._s.stt_gain_max))
+                if gain > 1.05:  # only boost meaningfully-quiet audio
+                    samples = np.clip(samples.astype(np.float32) * gain, -32768, 32767).astype(np.int16)
+                    self._trace.emit("stt", f"genormaliseerd ×{gain:.1f}", direction="out",
+                                     data={"peak_before": peak, "gain": round(gain, 2)})
         wav = audio.int16_to_wav_bytes(samples, in_rate)
         url = f"{self._s.stt_base_url.rstrip('/')}/audio/transcriptions"
         files = {"file": ("audio.wav", wav, "audio/wav")}

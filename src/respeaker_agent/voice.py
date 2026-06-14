@@ -242,7 +242,7 @@ class VoicePipeline:
             # paired Bluetooth speaker) instead of the device. We AWAIT real playback,
             # so no duration guessing. Follow-up (mic re-open) rides the device announce
             # path, which we skip here — so this turn ends and the user wakes again.
-            self._trace.emit("tts", result.text, direction="out", data={"sink": self._s.audio_sink})
+            # (synth_stream already emits the "tts" trace — don't double-log here.)
             await play_pcm_stream(self._tts.synth_stream(result.text), self._s.audio_sink, self._s.tts_out_rate, self._trace)
             self._event(_EVT.VOICE_ASSISTANT_TTS_END)
             self._run_end()

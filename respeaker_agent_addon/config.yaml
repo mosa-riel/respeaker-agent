@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.4.5"
+version: "0.4.6"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -55,6 +55,8 @@ options:
   stt_base_url: https://api.mistral.ai/v1
   stt_model: voxtral-mini-latest
   stt_language: nl
+  stt_normalize: true
+  stt_gain_max: 12.0
   tts_provider: voxtral
   tts_base_url: https://api.mistral.ai/v1
   tts_model: voxtral-mini-tts-2603
@@ -87,6 +89,8 @@ schema:
   stt_base_url: url
   stt_model: str
   stt_language: str
+  stt_normalize: bool
+  stt_gain_max: float(1,30)
   tts_provider: list(voxtral|openai)
   tts_base_url: url
   tts_model: str
