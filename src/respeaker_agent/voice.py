@@ -246,7 +246,7 @@ class VoicePipeline:
             # so no duration guessing. Follow-up (mic re-open) rides the device announce
             # path, which we skip here — so this turn ends and the user wakes again.
             # (synth_stream already emits the "tts" trace — don't double-log here.)
-            await play_pcm_stream(self._tts.synth_stream(result.text), self._s.audio_sink, self._s.tts_out_rate, self._trace)
+            await play_pcm_stream(self._tts.synth_stream(result.text), self._s.audio_sink, self._s.tts_out_rate, self._trace, lead_ms=self._s.bt_lead_silence_ms)
             self._event(_EVT.VOICE_ASSISTANT_TTS_END)
             self._run_end()
             self.last_activity = "klaar"
@@ -294,7 +294,7 @@ class VoicePipeline:
             from pathlib import Path
             from .local_play import play_file
             flac = Path(__file__).parent / "assets" / "wake_word_triggered.flac"
-            await play_file(str(flac), self._s.audio_sink, self._trace)
+            await play_file(str(flac), self._s.audio_sink, self._trace, lead_ms=self._s.bt_lead_silence_ms)
         except Exception as err:  # noqa: BLE001 - a cue must never break the turn
             self._trace.emit("info", f"wake chime failed: {str(err)[:80]}")
 
@@ -313,7 +313,7 @@ class VoicePipeline:
                     with open(p, "wb") as f:
                         f.write(make_chime_flac())
                     self._end_chime_path = p
-                await play_file(self._end_chime_path, self._s.audio_sink, self._trace)
+                await play_file(self._end_chime_path, self._s.audio_sink, self._trace, lead_ms=self._s.bt_lead_silence_ms)
             except Exception as err:  # noqa: BLE001
                 self._trace.emit("info", f"end chime failed: {str(err)[:80]}")
             return

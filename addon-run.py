@@ -69,7 +69,8 @@ def main() -> None:
         "tts_pcm_rate", "tts_out_rate", "tts_voice_format", "tts_audio_port",
         "tts_audio_host", "voice_enabled", "voice_followup", "voice_end_chime",
         "device_volume", "vad_threshold", "vad_silence_ms", "vad_max_ms",
-        "vad_prespeech_ms", "audio_sink", "bluetooth_control", "save_recordings",
+        "vad_prespeech_ms", "audio_sink", "bt_lead_silence_ms", "bluetooth_control",
+        "save_recordings",
     )
     for k in SCALAR_OPTS:
         if k in opts:

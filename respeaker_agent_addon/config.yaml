@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.4.9"
+version: "0.4.10"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -76,6 +76,7 @@ options:
   vad_max_ms: 12000
   vad_prespeech_ms: 7000
   audio_sink: ""
+  bt_lead_silence_ms: 700
   bluetooth_control: false
   save_recordings: true
 schema:
@@ -113,6 +114,9 @@ schema:
   # PulseAudio sink for TTS out; empty = reSpeaker device speaker. A connected BT speaker
   # is bluez_sink.<MAC_with_underscores>.a2dp_sink. "default" = host default sink.
   audio_sink: str?
+  # Lead silence (ms) before local/BT playback so a suspended A2DP sink wakes during the
+  # silence instead of clipping the first second. 0 = off (wired/always-on sink).
+  bt_lead_silence_ms: int(0,3000)
   # Expose locked-down bluetoothctl tools (scan/list/connect) so the agent can re-pair a
   # speaker. Needs host_dbus (above). Off by default.
   bluetooth_control: bool
