@@ -68,6 +68,16 @@
 				<div class="trace-list" id="monitor"></div>
 			</div>
 		</section>
+		<!-- Captured utterances — hear what STT received -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🎧</div>
+				<div><div class="section-title">Opnames</div>
+					<div class="section-desc">wat de STT hoorde — beluister de kwaliteit (laatste 20)</div></div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="loadRecordings()">↻ Vernieuwen</button>
+			</div>
+			<div class="card-body"><div id="rec-list"></div></div>
+		</section>
 		</section><!-- /live -->
 
 		<section class="page" data-page="playground">
@@ -417,6 +427,20 @@
 			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
 		});
 
+		/* ── recordings ── */
+		async function loadRecordings() {
+			let d;
+			try { d = await (await fetch('/api/recordings')).json(); } catch { return; }
+			const list = d.recordings || [];
+			$('rec-list').innerHTML = list.length ? list.map(r => `
+				<div class="rec-item">
+					<div class="rec-meta"><span class="rec-text">${esc(r.text || '(leeg)')}</span>
+						<span class="muted">${r.seconds}s</span></div>
+					<audio controls preload="none" src="/api/recordings/${esc(r.name)}"></audio>
+				</div>`).join('')
+				: '<p class="muted">Nog geen opnames. Spreek de reSpeaker aan.</p>';
+		}
+
 		/* ── restart add-on ── */
 		async function restartAddon() {
 			if (!confirm('Add-on herstarten? De UI verliest even verbinding.')) return;
@@ -624,6 +648,7 @@
 			document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page === page));
 			document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.nav === page));
 			if (page === 'home') drawWires();  // flowmap needs a redraw once visible
+			if (page === 'live') loadRecordings();
 			if (location.hash !== '#' + page) location.hash = page;
 		}
 		document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.nav)));
@@ -660,7 +685,7 @@
 		buildPipeline();
 		if (window.ResizeObserver) new ResizeObserver(drawWires).observe($('flowmap'));
 		else window.addEventListener('resize', drawWires);
-		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome(); loadBluetooth();
+		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome(); loadBluetooth(); loadRecordings();
 		setInterval(refresh, 3000);
 		if (location.hash.slice(1)) navigate(location.hash.slice(1));  // deep-link to a page
 	</script>

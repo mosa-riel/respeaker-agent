@@ -59,6 +59,15 @@ manifest; see `deployment.md`. Optional `bluetooth_control` exposes locked-down
 `bluetoothctl` agent tools to scan/connect speakers (needs `host_dbus`) — see step 10 +
 `security.md`.
 
+## Diagnosing bad transcriptions — recordings
+
+`save_recordings` (default on) writes each captured utterance — the **exact mic PCM sent
+to STT** — as `<config-dir>/recordings/<ts>.wav` + a `.txt` transcript, last 20
+(`recordings.py`). The **Live** page lists them with players (`GET /api/recordings`,
+`/api/recordings/{name}`; name regex-validated). Play one back: if it sounds clipped /
+quiet / cut short → it's capture/VAD (`vad_*`, gain); if it sounds clear but the
+transcript is garbage/wrong-language → it's the STT model/language forcing, not the audio.
+
 ## Config keys (all non-secret, UI-editable)
 
 `stt_base_url`, `stt_model`, `tts_provider`, `tts_base_url`, `tts_model`,

@@ -219,6 +219,9 @@ class VoicePipeline:
         self._event(_EVT.VOICE_ASSISTANT_STT_START)
         text = await self._stt.transcribe(audio, in_rate=DEVICE_MIC_RATE)
         self._event(_EVT.VOICE_ASSISTANT_STT_END, {"text": text})
+        if self._s.save_recordings:
+            from . import recordings
+            recordings.save(audio, DEVICE_MIC_RATE, text)  # keep what STT heard, to play back
         if not text:
             self.last_activity = "niets verstaan"
             return False

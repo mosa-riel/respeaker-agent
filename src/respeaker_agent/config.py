@@ -151,6 +151,10 @@ class Settings:
     # binary is fixed, the sub-command allowlisted, and the only free arg is a
     # regex-validated MAC — no user string ever reaches a shell. See bluetooth.py.
     bluetooth_control: bool = False
+    # Save each captured utterance (the exact mic PCM sent to STT) as a WAV + transcript
+    # under <config-dir>/recordings/, last 20, playable on the Live page. For diagnosing
+    # bad transcriptions — hear the actual capture quality.
+    save_recordings: bool = True
     mcp_servers: list[McpServer] = field(default_factory=list)
 
     @classmethod

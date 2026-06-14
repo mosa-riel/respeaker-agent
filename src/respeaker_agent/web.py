@@ -324,6 +324,21 @@ async def list_voices() -> JSONResponse:
     return JSONResponse({"voices": voices})
 
 
+@app.get("/api/recordings")
+async def list_recordings() -> JSONResponse:
+    from . import recordings
+    return JSONResponse({"recordings": recordings.latest()})
+
+
+@app.get("/api/recordings/{name}")
+async def get_recording(name: str) -> Response:
+    from . import recordings
+    p = recordings.path_for(name)
+    if p is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(str(p), media_type="audio/wav", filename=f"{name}.wav")
+
+
 @app.post("/api/restart")
 async def restart_addon() -> JSONResponse:
     """Restart the add-on via the Supervisor (for changes that only apply at startup,
