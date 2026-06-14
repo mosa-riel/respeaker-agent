@@ -57,27 +57,27 @@ def main() -> None:
     # reaches it, never on a guessable LAN port without the proxy guard.
     cfg["web_host"] = "0.0.0.0"
     cfg["web_port"] = 8099
-    # Network-critical options, enforced every boot: bridged means the device must be
-    # reached by IP (no mDNS) and the device must fetch TTS audio from the host's LAN IP.
-    for k in ("device_host", "tts_audio_host"):
-        if opts.get(k):
-            cfg[k] = opts[k]
-    # Audio-out routing, enforced every boot from the add-on options page: which sink TTS
-    # plays to, and whether the host bluetoothctl tools are exposed.
-    cfg["audio_sink"] = opts.get("audio_sink", "") or ""
-    cfg["bluetooth_control"] = bool(opts.get("bluetooth_control", False))
-    print(
-        f"[addon-run] applied from add-on options: device_host={cfg.get('device_host')!r} "
-        f"tts_audio_host={cfg.get('tts_audio_host')!r} audio_sink={cfg.get('audio_sink')!r} "
-        f"bluetooth_control={cfg.get('bluetooth_control')}"
+    # The add-on Configuration page is the SOURCE OF TRUTH for all scalar settings: every
+    # one is enforced into config.json every boot. The web UI only owns what HA's static
+    # form can't do well — tts_voice_id (live dropdown), system_prompt, stt_extra (JSON),
+    # mcp_servers — so those are NOT listed here and survive across restarts.
+    SCALAR_OPTS = (
+        "device_host", "device_port", "llm_base_url", "llm_model", "llm_temperature",
+        "max_tool_rounds", "home_context_refresh_sec", "stt_base_url", "stt_model",
+        "stt_language", "tts_provider", "tts_base_url", "tts_model", "tts_format",
+        "tts_pcm_rate", "tts_out_rate", "tts_voice_format", "tts_audio_port",
+        "tts_audio_host", "voice_enabled", "voice_followup", "voice_end_chime",
+        "device_volume", "vad_threshold", "vad_silence_ms", "vad_max_ms",
+        "vad_prespeech_ms", "audio_sink", "bluetooth_control",
     )
-    if first_boot:
-        # Seed a few user-facing fields from options once; afterwards the UI owns them.
-        for k in ("tts_voice_id", "llm_model"):
-            if opts.get(k):
-                cfg[k] = opts[k]
-        if "voice_enabled" in opts:
-            cfg["voice_enabled"] = bool(opts["voice_enabled"])
+    for k in SCALAR_OPTS:
+        if k in opts:
+            cfg[k] = opts[k]
+    print(
+        f"[addon-run] applied {len(SCALAR_OPTS)} scalar options from add-on config: "
+        f"device_host={cfg.get('device_host')!r} voice_enabled={cfg.get('voice_enabled')} "
+        f"audio_sink={cfg.get('audio_sink')!r} bluetooth_control={cfg.get('bluetooth_control')}"
+    )
     with open(CONFIG, "w") as f:
         json.dump(cfg, f, indent=2)
 

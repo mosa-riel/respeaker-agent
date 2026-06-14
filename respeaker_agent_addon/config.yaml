@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.3.2"
+version: "0.4.0"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -36,18 +36,70 @@ ports:
   8731/tcp: 8731
 ports_description:
   8731/tcp: TTS audio the reSpeaker fetches for playback (set tts_audio_host to this host's LAN IP)
+# All non-secret SCALAR settings live here (single source of truth) — addon-run.py writes
+# them into /data/config.json every boot. The web UI keeps the things HA's static form
+# can't do well: the live voice-id dropdown, system_prompt, stt_extra (JSON), and MCP
+# server/tool management. web_host/web_port are NOT options (ingress bind is enforced).
 options:
   api_key: ""
   device_host: 192.168.18.151
+  device_port: 6053
+  llm_base_url: https://api.mistral.ai/v1
+  llm_model: mistral-medium-latest
+  llm_temperature: 0.1
+  max_tool_rounds: 5
+  home_context_refresh_sec: 900
+  stt_base_url: https://api.mistral.ai/v1
+  stt_model: voxtral-mini-latest
+  stt_language: nl
+  tts_provider: voxtral
+  tts_base_url: https://api.mistral.ai/v1
+  tts_model: voxtral-mini-tts-2603
+  tts_format: pcm
+  tts_pcm_rate: 24000
+  tts_out_rate: 16000
+  tts_voice_format: flac
+  tts_audio_port: 8731
   tts_audio_host: 192.168.18.31
   voice_enabled: true
+  voice_followup: true
+  voice_end_chime: true
+  device_volume: 1.0
+  vad_threshold: 500
+  vad_silence_ms: 800
+  vad_max_ms: 12000
+  vad_prespeech_ms: 7000
   audio_sink: ""
   bluetooth_control: false
 schema:
   api_key: "password?"
   device_host: str
+  device_port: int(1,65535)
+  llm_base_url: url
+  llm_model: str
+  llm_temperature: float(0,2)
+  max_tool_rounds: int(1,20)
+  home_context_refresh_sec: int(0,86400)
+  stt_base_url: url
+  stt_model: str
+  stt_language: str
+  tts_provider: list(voxtral|openai)
+  tts_base_url: url
+  tts_model: str
+  tts_format: list(pcm|wav)
+  tts_pcm_rate: int(8000,48000)
+  tts_out_rate: int(8000,48000)
+  tts_voice_format: list(flac|mp3|wav|opus)
+  tts_audio_port: int(1,65535)
   tts_audio_host: str
   voice_enabled: bool
+  voice_followup: bool
+  voice_end_chime: bool
+  device_volume: float(0,1)
+  vad_threshold: int(0,20000)
+  vad_silence_ms: int(100,5000)
+  vad_max_ms: int(2000,60000)
+  vad_prespeech_ms: int(1000,30000)
   # PulseAudio sink for TTS out; empty = reSpeaker device speaker. A connected BT speaker
   # is bluez_sink.<MAC_with_underscores>.a2dp_sink. "default" = host default sink.
   audio_sink: str?

@@ -347,3 +347,45 @@ h1, h2, h3, h4 {
 .modal-check input { accent-color: var(--color-brand); width: 16px; height: 16px; }
 .modal-foot { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--color-gray-100); }
 .modal-foot .btn-primary { margin-left: auto; }
+
+/* ── sidebar nav + pages ────────────────────────────────────────────────── */
+.app-shell { display: flex; align-items: flex-start; }
+.sidebar {
+	position: sticky; top: var(--header-height);
+	width: 210px; flex: 0 0 210px;
+	height: calc(100vh - var(--header-height));
+	padding: 18px 12px; box-sizing: border-box;
+	display: flex; flex-direction: column; gap: 4px;
+	background: white; border-right: 1px solid var(--color-gray-100);
+}
+.nav-item {
+	display: flex; align-items: center; gap: 10px;
+	width: 100%; padding: 10px 14px; border: none; background: none;
+	border-radius: var(--radius-md); cursor: pointer; text-align: left;
+	font-family: var(--font-heading); font-size: 0.95rem; font-weight: 500;
+	letter-spacing: -0.01em; color: var(--color-gray-600);
+}
+.nav-item:hover { background: var(--color-gray-100); color: var(--color-gray-900); }
+.nav-item.active { background: var(--color-brand-subtle); color: var(--color-brand); }
+.nav-ico { font-size: 1.05rem; line-height: 1; }
+.app-main { flex: 1 1 auto; min-width: 0; }
+.page { display: none; flex-direction: column; gap: 20px; }
+.page.active { display: flex; }
+
+/* read-only config mirror */
+.ro-banner { background: var(--color-brand-subtle); color: var(--color-gray-700);
+	padding: 10px 12px; border-radius: var(--radius-md); margin: 0 0 14px; }
+.ro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 18px; }
+.ro-item { display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+	padding: 7px 0; border-bottom: 1px solid var(--color-gray-100); font-size: 0.85rem; }
+.ro-label { color: var(--color-gray-500); }
+.ro-value { color: var(--color-gray-900); font-weight: 600; font-family: var(--font-heading);
+	text-align: right; word-break: break-all; }
+
+@media (max-width: 760px) {
+	.app-shell { flex-direction: column; }
+	.sidebar { position: static; width: 100%; flex: none; height: auto;
+		flex-direction: row; overflow-x: auto; border-right: none;
+		border-bottom: 1px solid var(--color-gray-100); }
+	.nav-label { display: none; }
+}

@@ -17,11 +17,21 @@
 		<span id="stream-pill" class="status-pill" style="margin-left:auto"><span class="dot"></span> live</span>
 	</header>
 
+	<div class="app-shell">
+	<nav class="sidebar" id="sidebar">
+		<button class="nav-item active" data-nav="home">Home</button>
+		<button class="nav-item" data-nav="live">Live</button>
+		<button class="nav-item" data-nav="playground">Playground</button>
+		<button class="nav-item" data-nav="bluetooth" id="nav-bluetooth" hidden>Bluetooth</button>
+		<button class="nav-item" data-nav="settings">Instellingen</button>
+		<button class="nav-item" data-nav="mcp">MCP servers</button>
+	</nav>
 	<main class="app-main">
+		<section class="page active" data-page="home">
 		<!-- Rollout status strip — agent + device + each MCP add-on (one dot each) -->
 		<div class="apps-strip" id="apps-strip" title="rollout status — green = up"></div>
 
-		<!-- Live voice pipeline — flow-graph -->
+		<!-- Live voice pipeline — flow-graph (home) -->
 		<section class="flowmap-wrap">
 			<div class="flowmap-head">
 				<span class="flowmap-live">live</span>
@@ -35,37 +45,11 @@
 			<div class="flowmap" id="flowmap">
 				<svg class="wires" id="wires" aria-hidden="true"></svg>
 			</div>
-			<p class="muted flowmap-hint">tip: klik een stap aan om z'n instellingen te openen</p>
+			<p class="muted flowmap-hint">tip: klik een stap → Instellingen</p>
 		</section>
+		</section><!-- /home -->
 
-		<!-- Per-stage settings modal (opened by clicking a pipeline node) -->
-		<div class="modal-overlay" id="node-modal" hidden onclick="if(event.target===this)closeNode()">
-			<div class="modal">
-				<div class="modal-head">
-					<h3 class="modal-title" id="modal-title"></h3>
-					<button class="modal-x" onclick="closeNode()" aria-label="close">×</button>
-				</div>
-				<div class="modal-body" id="modal-body"></div>
-				<div class="modal-foot">
-					<span class="muted" id="modal-note"></span>
-					<button class="btn-primary" id="modal-save" onclick="saveNode()">Save</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- Device status -->
-		<section class="card">
-			<div class="card-head">
-				<div class="section-icon">🎙️</div>
-				<div>
-					<div class="section-title">Device</div>
-					<div class="section-desc">reSpeaker XVF3800 — ESPHome native API</div>
-				</div>
-				<button class="btn-ghost" style="margin-left:auto" onclick="refresh()">↻ Refresh</button>
-			</div>
-			<div class="card-body"><div id="device-rows"></div></div>
-		</section>
-
+		<section class="page" data-page="live">
 		<!-- Live pipeline monitor -->
 		<section class="card">
 			<div class="card-head">
@@ -83,7 +67,9 @@
 				<div class="trace-list" id="monitor"></div>
 			</div>
 		</section>
+		</section><!-- /live -->
 
+		<section class="page" data-page="playground">
 		<!-- Test chat (Playground) -->
 		<section class="card">
 			<div class="card-head">
@@ -105,57 +91,78 @@
 			</div>
 		</section>
 
-		<!-- Config -->
+		</section><!-- /playground -->
+
+		<section class="page" data-page="bluetooth">
+		<!-- Bluetooth speakers — search / pair / connect from the app -->
 		<section class="card">
 			<div class="card-head">
-				<div class="section-icon">⚙️</div>
-				<div><div class="section-title">Configuration</div>
-					<div class="section-desc">non-secret settings · API keys live in .env</div></div>
-				<button class="btn-primary" style="margin-left:auto" onclick="saveConfig()">Save</button>
+				<div class="section-icon">🔵</div>
+				<div><div class="section-title">Bluetooth-luidsprekers</div>
+					<div class="section-desc">zoek, koppel en verbind een speaker · TTS speelt op de actieve sink</div></div>
+				<button class="btn-secondary" style="margin-left:auto" id="bt-scan" onclick="btScan()">Zoeken</button>
+				<button class="btn-ghost" onclick="loadBluetooth()">↻</button>
+			</div>
+			<div class="card-body">
+				<p class="muted" id="bt-sink"></p>
+				<div id="bt-list"></div>
+				<p class="muted" id="bt-note"></p>
+			</div>
+		</section>
+		</section><!-- /bluetooth -->
+
+		<section class="page" data-page="settings">
+		<!-- Editable in the agent (HA's static add-on form can't do these well) -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🗣️</div>
+				<div><div class="section-title">Stem &amp; prompt</div>
+					<div class="section-desc">de dingen die hier thuishoren · API keys staan in .env</div></div>
+				<button class="btn-primary" style="margin-left:auto" onclick="saveConfig()">Opslaan</button>
 			</div>
 			<div class="card-body">
 				<div class="field-stack">
-					<div class="grid-2">
-						<div class="field"><label class="field-label">Device host</label>
-							<input class="field-input" id="device_host" /></div>
-						<div class="field"><label class="field-label">Device port</label>
-							<input class="field-input" id="device_port" type="number" /></div>
-					</div>
-					<div class="grid-2">
-						<div class="field"><label class="field-label">LLM base URL</label>
-							<input class="field-input" id="llm_base_url" /></div>
-						<div class="field"><label class="field-label">LLM model</label>
-							<input class="field-input" id="llm_model" /></div>
-					</div>
-					<div class="grid-2">
-							<div class="field"><label class="field-label">STT base URL</label>
-								<input class="field-input" id="stt_base_url" /></div>
-							<div class="field"><label class="field-label">STT model</label>
-								<input class="field-input" id="stt_model" /></div>
-						</div>
-						<div class="grid-2">
-							<div class="field"><label class="field-label">TTS provider</label>
-								<input class="field-input" id="tts_provider" placeholder="voxtral | openai" /></div>
-							<div class="field"><label class="field-label">TTS base URL</label>
-								<input class="field-input" id="tts_base_url" /></div>
-						</div>
-						<div class="grid-2">
-							<div class="field"><label class="field-label">TTS model</label>
-								<input class="field-input" id="tts_model" /></div>
-							<div class="field"><label class="field-label">TTS voice id</label>
-								<input class="field-input" id="tts_voice_id" /></div>
-						</div>
-						<div class="grid-2">
-							<div class="field"><label class="field-label">TTS format</label>
-								<input class="field-input" id="tts_format" placeholder="pcm | wav" /></div>
-							<div class="field"><label class="field-label">TTS output rate (Hz)</label>
-								<input class="field-input" id="tts_out_rate" type="number" /></div>
-						</div>
-						<p class="muted" id="save-note"></p>
+					<div class="field"><label class="field-label">Stem</label>
+						<select class="field-input" id="voice-select"><option value="">— laden… —</option></select>
+						<span class="muted" id="voice-hint" style="font-size:11px">voices laden…</span></div>
+					<div class="field"><label class="field-label">System prompt</label>
+						<textarea class="field-input" id="system_prompt" rows="8"></textarea></div>
+					<div class="field"><label class="field-label">STT extra params (JSON, bv. {"context_bias":"Keukenkopjes,Eettafel"})</label>
+						<textarea class="field-input" id="stt_extra" rows="3"></textarea></div>
+					<p class="muted" id="save-note"></p>
 				</div>
 			</div>
 		</section>
-	<!-- MCP servers -->
+		<!-- Everything else: source of truth is the HA add-on Configuration tab -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">⚙️</div>
+				<div><div class="section-title">Instellingen (alleen-lezen)</div>
+					<div class="section-desc">bron: HA add-on → Configuratie · herstart na wijziging</div></div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="loadConfig()">↻ Vernieuwen</button>
+			</div>
+			<div class="card-body">
+				<p class="muted ro-banner">Deze waarden worden elke boot door de add-on afgedwongen. Wijzig ze in
+					<strong>Instellingen → Add-ons → reSpeaker Agent → Configuratie</strong>, niet hier.</p>
+				<div class="ro-grid" id="ro-config"></div>
+			</div>
+		</section>
+		<!-- Device status (read-only) -->
+		<section class="card">
+			<div class="card-head">
+				<div class="section-icon">🎙️</div>
+				<div>
+					<div class="section-title">Device</div>
+					<div class="section-desc">reSpeaker XVF3800 — ESPHome native API</div>
+				</div>
+				<button class="btn-ghost" style="margin-left:auto" onclick="refresh()">↻ Refresh</button>
+			</div>
+			<div class="card-body"><div id="device-rows"></div></div>
+		</section>
+		</section><!-- /settings -->
+
+		<section class="page" data-page="mcp">
+		<!-- MCP servers -->
 		<section class="card">
 			<div class="card-head">
 				<div class="section-icon">🔌</div>
@@ -175,7 +182,9 @@
 				<p class="muted" id="mcp-note">Add remote (http/sse) servers here. Restart the agent to connect.</p>
 			</div>
 		</section>
+		</section><!-- /mcp -->
 	</main>
+	</div><!-- /app-shell -->
 
 	<script>
 		const $ = (id) => document.getElementById(id);
@@ -257,24 +266,45 @@
 			es.onerror = () => { $('stream-pill').className = 'status-pill warn'; $('stream-pill').innerHTML = '<span class="dot"></span> reconnecting'; };
 		}
 
-		/* ── config ── */
-		const CFG_STR = ['device_host', 'llm_base_url', 'llm_model', 'stt_base_url', 'stt_model',
-			'tts_provider', 'tts_base_url', 'tts_model', 'tts_voice_id', 'tts_format'];
-		const CFG_NUM = ['device_port', 'tts_out_rate'];
+		/* ── config ── editable here: voice, system_prompt, stt_extra. Everything
+		   else is sourced from the HA add-on config (read-only mirror below). */
+		const RO_FIELDS = [
+			['device_host', 'Device host'], ['device_port', 'Device port'],
+			['llm_base_url', 'LLM base URL'], ['llm_model', 'LLM model'],
+			['llm_temperature', 'LLM temperatuur'], ['max_tool_rounds', 'Max tool-rondes'],
+			['stt_base_url', 'STT base URL'], ['stt_model', 'STT model'], ['stt_language', 'STT taal'],
+			['tts_provider', 'TTS provider'], ['tts_base_url', 'TTS base URL'], ['tts_model', 'TTS model'],
+			['tts_format', 'TTS formaat'], ['tts_out_rate', 'TTS output rate'], ['tts_voice_format', 'TTS device-formaat'],
+			['tts_audio_host', 'TTS audio host'], ['tts_audio_port', 'TTS audio poort'],
+			['voice_enabled', 'Voice aan'], ['voice_followup', 'Follow-up'], ['voice_end_chime', 'Eind-chime'],
+			['device_volume', 'Volume'], ['audio_sink', 'Audio sink'], ['bluetooth_control', 'Bluetooth-besturing'],
+			['vad_threshold', 'VAD drempel'], ['vad_silence_ms', 'VAD stilte (ms)'],
+			['vad_max_ms', 'VAD max (ms)'], ['vad_prespeech_ms', 'VAD pre-speech (ms)'],
+		];
 		async function loadConfig() {
 			const c = await (await fetch('/api/config')).json();
-			for (const k of [...CFG_STR, ...CFG_NUM]) if ($(k)) $(k).value = c[k] ?? '';
 			if ($('followup-tg')) $('followup-tg').checked = !!c.voice_followup;
+			if ($('system_prompt')) $('system_prompt').value = c.system_prompt ?? '';
+			if ($('stt_extra')) $('stt_extra').value = JSON.stringify(c.stt_extra || {}, null, 0);
+			const ro = $('ro-config');
+			if (ro) ro.innerHTML = RO_FIELDS.map(([k, label]) => {
+				let v = c[k];
+				if (typeof v === 'boolean') v = v ? 'aan' : 'uit';
+				v = (v === '' || v == null) ? '—' : String(v);
+				return `<div class="ro-item"><span class="ro-label">${label}</span><span class="ro-value">${esc(v)}</span></div>`;
+			}).join('');
+			if ($('voice-select')) populateVoices(c.tts_voice_id);
 		}
 		async function toggleFollowup(on) {
 			await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice_followup: on }) });
 		}
 		async function saveConfig() {
-			const body = {};
-			for (const k of CFG_STR) body[k] = $(k).value;
-			for (const k of CFG_NUM) body[k] = Number($(k).value);
+			const body = { system_prompt: $('system_prompt').value, tts_voice_id: $('voice-select').value };
+			const raw = $('stt_extra').value.trim();
+			try { body.stt_extra = raw ? JSON.parse(raw) : {}; }
+			catch { $('save-note').textContent = 'Ongeldige JSON bij STT extra params'; return; }
 			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
-			$('save-note').textContent = r.error ? `Error: ${r.error}` : (r.note || 'Saved.');
+			$('save-note').textContent = r.ok === false ? `Fout: ${r.error}` : (r.note || 'Opgeslagen.');
 		}
 
 		/* ── test chat ── */
@@ -386,6 +416,58 @@
 			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
 		});
 
+		/* ── Bluetooth speakers ── */
+		function btRow(d) {
+			const sink = 'bluez_sink.' + d.mac.replace(/:/g, '_') + '.a2dp_sink';
+			const badge = d.connected ? '<span class="status-pill ok"><span class="dot"></span>verbonden</span>' : '';
+			const btn = d.connected
+				? `<button class="btn-ghost" onclick="btDisconnect('${d.mac}')">Verbreken</button>`
+				: `<button class="btn-secondary" onclick="btConnect('${d.mac}')">Verbinden</button>`;
+			return `<div class="detail-row">
+				<div class="detail-text">
+					<span class="detail-value" style="font-weight:600">${esc(d.name || '(naamloos)')}</span>
+					<span class="muted">${esc(d.mac)}</span>${badge}
+				</div>
+				<div style="margin-left:auto;display:flex;gap:8px;align-items:center">${btn}</div>
+			</div>`;
+		}
+		async function loadBluetooth() {
+			let d;
+			try { d = await (await fetch('/api/bluetooth')).json(); } catch { return; }
+			const nav = $('nav-bluetooth');
+			if (!d.enabled) { if (nav) nav.hidden = true; return; }
+			if (nav) nav.hidden = false;
+			if (d.error) { $('bt-list').innerHTML = `<p class="muted">Fout: ${esc(d.error)}</p>`; return; }
+			$('bt-sink').innerHTML = d.audio_sink
+				? `Actieve sink: <strong>${esc(d.audio_sink)}</strong>`
+				: 'Geen sink ingesteld — TTS speelt op de reSpeaker zelf.';
+			const list = d.devices || [];
+			$('bt-list').innerHTML = list.length ? list.map(btRow).join('')
+				: '<p class="muted">Geen bekende apparaten. Klik “Zoeken”.</p>';
+		}
+		async function btScan() {
+			const b = $('bt-scan'); b.disabled = true; b.textContent = 'Zoeken…';
+			$('bt-note').textContent = 'Scannen (~12s)…';
+			try {
+				await (await fetch('/api/bluetooth/scan', { method: 'POST' })).json();
+				$('bt-note').textContent = 'Scan klaar.';
+				await loadBluetooth();
+			} catch (e) { $('bt-note').textContent = 'Scan mislukt: ' + e; }
+			finally { b.disabled = false; b.textContent = 'Zoeken'; }
+		}
+		async function btConnect(mac) {
+			$('bt-note').textContent = 'Verbinden met ' + mac + '…';
+			const r = await (await fetch('/api/bluetooth/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mac }) })).json();
+			$('bt-note').textContent = r.error ? ('Fout: ' + r.error) : (r.note || (r.ok ? 'Verbonden.' : 'Verbinden mislukt.'));
+			loadBluetooth(); loadConfig();  // sink may have changed
+		}
+		async function btDisconnect(mac) {
+			$('bt-note').textContent = 'Verbreken…';
+			const r = await (await fetch('/api/bluetooth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mac }) })).json();
+			$('bt-note').textContent = r.error ? ('Fout: ' + r.error) : 'Verbroken.';
+			loadBluetooth();
+		}
+
 		/* ── live pipeline flow-graph ── */
 		const NS = 'http://www.w3.org/2000/svg';
 		// x/y are % of the canvas. The pipeline flows Wake→STT→LLM→Tools→TTS; Device
@@ -412,8 +494,8 @@
 				el.className = `fn fn-${n.shape}` + (n.detached ? ' fn-detached' : '');
 				el.id = 'fn-' + n.id;
 				el.style.left = n.x + '%'; el.style.top = n.y + '%';
-				el.title = 'instellingen';
-				el.addEventListener('click', () => openNode(n.id));
+				el.title = 'open Instellingen';
+				el.addEventListener('click', () => navigate('settings'));
 				el.innerHTML = `<div class="fn-icon">${n.icon}</div><div class="fn-label">${n.label}</div>` +
 					(n.eq ? '<div class="fn-eq"><i></i><i></i><i></i><i></i><i></i></div>'
 						: `<div class="fn-sub" id="fn-sub-${n.id}"></div>`);
@@ -502,84 +584,7 @@
 			lastNode = lit;
 		}
 
-		/* ── per-stage settings modal ── */
-		const NODE_FORMS = {
-			wake: {
-				title: '🎙️ Wake / device', note: 'restart om verbinding toe te passen', fields: [
-					{ k: 'voice_enabled', t: 'bool', label: 'Voice ingeschakeld' },
-					{ k: 'device_host', label: 'Device host' },
-					{ k: 'device_port', t: 'int', label: 'Device poort' },
-				]
-			},
-			stt: {
-				title: '🗣️ Spraak → tekst', fields: [
-					{ k: 'stt_base_url', label: 'STT base URL' },
-					{ k: 'stt_model', label: 'STT model' },
-					{ k: 'stt_language', label: 'Taal (bv. nl)' },
-					{ k: 'stt_extra', t: 'json', label: 'Extra params (JSON, bv. {"context_bias":"Keukenkopjes,Eettafel"})' },
-				]
-			},
-			llm: {
-				title: '🧠 LLM / agent', fields: [
-					{ k: 'llm_base_url', label: 'LLM base URL' },
-					{ k: 'llm_model', label: 'LLM model' },
-					{ k: 'llm_temperature', t: 'float', label: 'Temperatuur (0–2)' },
-					{ k: 'max_tool_rounds', t: 'int', label: 'Max tool-rondes' },
-					{ k: 'system_prompt', t: 'textarea', label: 'System prompt' },
-				]
-			},
-			tool: { title: '🔧 Tools (MCP)', mcp: true },
-			tts: {
-				title: '🔊 Tekst → spraak', fields: [
-					{ k: 'tts_provider', label: 'Provider (voxtral|openai)' },
-					{ k: 'tts_base_url', label: 'TTS base URL' },
-					{ k: 'tts_model', label: 'TTS model' },
-					{ k: 'tts_voice_id', t: 'voices', label: 'Voice' },
-					{ k: 'tts_format', label: 'Engine-formaat (flac|pcm|wav)' },
-					{ k: 'tts_out_rate', t: 'int', label: 'Output rate (Hz)' },
-					{ k: 'voice_followup', t: 'bool', label: 'Follow-up gesprek' },
-					{ k: 'voice_end_chime', t: 'bool', label: 'Eind-chime' },
-				]
-			},
-			device: {
-				title: '📡 Device / opname', fields: [
-					{ k: 'device_volume', t: 'float', label: 'Volume (0–1)' },
-					{ k: 'vad_threshold', t: 'int', label: 'VAD drempel' },
-					{ k: 'vad_silence_ms', t: 'int', label: 'Stilte = einde (ms)' },
-					{ k: 'vad_max_ms', t: 'int', label: 'Max opname (ms)' },
-					{ k: 'vad_prespeech_ms', t: 'int', label: 'Geen-spraak timeout (ms)' },
-				]
-			},
-		};
-		let modalNode = null;
-		async function openNode(id) {
-			const form = NODE_FORMS[id]; if (!form) return;
-			modalNode = id;
-			$('modal-title').textContent = form.title;
-			$('modal-note').textContent = form.note || '';
-			const body = $('modal-body');
-			if (form.mcp) {
-				body.innerHTML = '<p class="muted">Tools komen van de MCP-servers. Beheer + in/uitschakelen per tool in de “MCP servers”-kaart hieronder.</p>';
-				$('modal-save').style.display = 'none';
-			} else {
-				$('modal-save').style.display = '';
-				const c = await (await fetch('/api/config')).json();
-				body.innerHTML = form.fields.map(f => {
-					const v = c[f.k] ?? '';
-					if (f.t === 'bool') return `<label class="modal-check"><input type="checkbox" data-k="${f.k}" data-t="bool" ${v ? 'checked' : ''}/> ${f.label}</label>`;
-					if (f.t === 'voices') return `<div class="field"><label class="field-label">${f.label}</label>
-						<select class="field-input" data-k="${f.k}" id="voice-select"><option value="${esc(String(v))}" selected>${v ? esc(String(v)) + ' (huidig)' : '— kies —'}</option></select>
-						<span class="muted" id="voice-hint" style="font-size:11px">voices laden…</span></div>`;
-					if (f.t === 'json') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" data-t="json" rows="3">${esc(JSON.stringify(v || {}, null, 0))}</textarea></div>`;
-					if (f.t === 'textarea') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" rows="4">${esc(String(v))}</textarea></div>`;
-					const it = (f.t === 'int' || f.t === 'float') ? 'number' : 'text';
-					const step = f.t === 'float' ? ' step="0.05"' : '';
-					return `<div class="field"><label class="field-label">${f.label}</label><input class="field-input" data-k="${f.k}" data-t="${f.t || 'str'}" type="${it}"${step} value="${esc(String(v))}"/></div>`;
-				}).join('');
-				if (form.fields.some(f => f.t === 'voices')) populateVoices(c.tts_voice_id);
-			}
-			$('node-modal').hidden = false;
-		}
+		/* ── settings voice dropdown ── */
 		async function populateVoices(current) {
 			const sel = $('voice-select'), hint = $('voice-hint');
 			if (!sel) return;
@@ -596,27 +601,16 @@
 				hint.textContent = `${r.voices.length} voices op deze key`;
 			} catch (e) { hint.textContent = 'voices ophalen mislukt — vul id handmatig'; }
 		}
-		function closeNode() { $('node-modal').hidden = true; modalNode = null; }
-		async function saveNode() {
-			const out = {};
-			let bad = null;
-			$('modal-body').querySelectorAll('[data-k]').forEach(el => {
-				const k = el.dataset.k, t = el.dataset.t;
-				if (t === 'bool') out[k] = el.checked;
-				else if (t === 'int') out[k] = parseInt(el.value, 10);
-				else if (t === 'float') out[k] = parseFloat(el.value);
-				else if (t === 'json') {
-					const s = el.value.trim();
-					try { out[k] = s ? JSON.parse(s) : {}; } catch { bad = k; }
-				}
-				else out[k] = el.value;
-			});
-			if (bad) { $('modal-note').textContent = `Ongeldige JSON bij ${bad}`; return; }
-			const r = await (await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) })).json();
-			$('modal-note').textContent = r.ok === false ? ('Fout: ' + r.error) : (r.note || 'Opgeslagen.');
-			if (r.ok !== false) { loadConfig(); setTimeout(closeNode, 800); }
+
+		/* ── page routing (sidebar) ── */
+		function navigate(page) {
+			document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page === page));
+			document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.nav === page));
+			if (page === 'home') drawWires();  // flowmap needs a redraw once visible
+			if (location.hash !== '#' + page) location.hash = page;
 		}
-		document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNode(); });
+		document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.nav)));
+		window.addEventListener('hashchange', () => { const p = location.hash.slice(1); if (p) navigate(p); });
 
 		function clearPipeline() {
 			PIPE.forEach(n => {
@@ -649,8 +643,9 @@
 		buildPipeline();
 		if (window.ResizeObserver) new ResizeObserver(drawWires).observe($('flowmap'));
 		else window.addEventListener('resize', drawWires);
-		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome();
+		renderFilters(); loadConfig(); refresh(); connectStream(); loadMcp(); loadHome(); loadBluetooth();
 		setInterval(refresh, 3000);
+		if (location.hash.slice(1)) navigate(location.hash.slice(1));  // deep-link to a page
 	</script>
 </body>
 </html>

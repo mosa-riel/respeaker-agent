@@ -27,7 +27,7 @@ from .home_context import HomeContext
 from .mcp_client import McpManager
 from .stt import STTClient
 from .tools import demo_registry
-from .bluetooth import bluetooth_tools
+from .bluetooth import bluetooth_tools, bt_list, bt_scan, bt_connect, bt_disconnect
 from .trace import TraceBus
 from .tts import make_tts
 from .tts_server import TTSAudioServer
@@ -322,6 +322,41 @@ async def list_voices() -> JSONResponse:
         for v in items if v.get("id")
     ]
     return JSONResponse({"voices": voices})
+
+
+def _bt_enabled() -> bool:
+    return bool(getattr(app.state.settings, "bluetooth_control", False))
+
+
+@app.get("/api/bluetooth")
+async def bluetooth_status() -> JSONResponse:
+    """Known devices + connection state + active sink. {enabled:false} when the
+    bluetooth_control gate is off (so the UI hides the page)."""
+    if not _bt_enabled():
+        return JSONResponse({"enabled": False})
+    res = await bt_list(app.state.settings)
+    return JSONResponse({"enabled": True, **res})
+
+
+@app.post("/api/bluetooth/scan")
+async def bluetooth_scan() -> JSONResponse:
+    if not _bt_enabled():
+        return JSONResponse({"ok": False, "error": "bluetooth_control is off"}, status_code=403)
+    return JSONResponse(await bt_scan(app.state.trace))
+
+
+@app.post("/api/bluetooth/connect")
+async def bluetooth_connect(payload: dict) -> JSONResponse:
+    if not _bt_enabled():
+        return JSONResponse({"ok": False, "error": "bluetooth_control is off"}, status_code=403)
+    return JSONResponse(await bt_connect(app.state.settings, app.state.trace, payload.get("mac")))
+
+
+@app.post("/api/bluetooth/disconnect")
+async def bluetooth_disconnect(payload: dict) -> JSONResponse:
+    if not _bt_enabled():
+        return JSONResponse({"ok": False, "error": "bluetooth_control is off"}, status_code=403)
+    return JSONResponse(await bt_disconnect(app.state.trace, payload.get("mac")))
 
 
 @app.post("/api/run")

@@ -113,6 +113,11 @@ gate:
   never interpolated. PCM fed on stdin is numpy-decoded audio — no exec path.
 - **`audio_sink` writable via config**: a string sink name; worst case is "audio plays to
   the wrong/nonexistent sink" (paplay errors, traced) — no exec, no bind. Acceptable.
+- **`/api/bluetooth*` endpoints (step 11)** expose the same scan/connect/disconnect ops to
+  the web UI. They call the identical fenced `bt_*` coroutines, and every handler re-checks
+  `bluetooth_control` (403 when off; GET returns `{enabled:false}`). No new surface beyond
+  the localhost/ingress-gated API already in the threat model — the MAC validation + no-shell
+  fence is shared with the tools.
 - **Residual:** `bluetooth_control` is reachable by the LLM tool loop, so web-search /
   HA prompt-injection could in theory trigger a scan/connect. Bounded — the actions are
   Bluetooth-pairing only (no data exfil, no code exec), MAC-gated, and off by default.
