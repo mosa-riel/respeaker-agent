@@ -339,24 +339,32 @@ async def get_recording(name: str) -> Response:
     return FileResponse(str(p), media_type="audio/wav", filename=f"{name}.wav")
 
 
-@app.post("/api/restart")
-async def restart_addon() -> JSONResponse:
-    """Restart the add-on via the Supervisor (for changes that only apply at startup,
-    e.g. MCP servers). Only works as an HA add-on — needs the injected SUPERVISOR_TOKEN
-    and `hassio_api: true`. The process dies mid-response, so the UI treats a dropped
-    connection as success."""
+async def _supervisor_restart_soon() -> None:
+    """Fire the Supervisor self-restart AFTER our response has been sent. The restart
+    kills this container; doing it inline would cut the HTTP response (and the killed
+    process can't release the Supervisor job → stale 'another job is running' lock). A
+    short delay lets the response flush and the request finish first."""
     import httpx
 
     token = os.getenv("SUPERVISOR_TOKEN")
-    if not token:
-        return JSONResponse({"ok": False, "error": "not running as a HA add-on (no SUPERVISOR_TOKEN)"}, status_code=400)
+    await asyncio.sleep(1.0)
     try:
         async with httpx.AsyncClient(timeout=10.0) as cli:
-            r = await cli.post("http://supervisor/addons/self/restart",
-                               headers={"Authorization": f"Bearer {token}"})
-            r.raise_for_status()
-    except Exception as err:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(err).splitlines()[0][:160]}, status_code=502)
+            await cli.post("http://supervisor/addons/self/restart",
+                           headers={"Authorization": f"Bearer {token}"})
+    except Exception:  # noqa: BLE001 - the container is going down anyway
+        pass
+
+
+@app.post("/api/restart")
+async def restart_addon() -> JSONResponse:
+    """Restart the add-on via the Supervisor (for changes that only apply at startup,
+    e.g. MCP servers). Only works as an HA add-on — needs SUPERVISOR_TOKEN + `hassio_api`.
+    Returns immediately; the actual restart is deferred so it doesn't truncate this
+    response or strand the Supervisor job lock."""
+    if not os.getenv("SUPERVISOR_TOKEN"):
+        return JSONResponse({"ok": False, "error": "not running as a HA add-on (no SUPERVISOR_TOKEN)"}, status_code=400)
+    asyncio.create_task(_supervisor_restart_soon())
     return JSONResponse({"ok": True, "note": "Herstarten…"})
 
 
