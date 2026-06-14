@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.4.0"
+version: "0.4.1"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -28,6 +28,9 @@ startup: services
 #   `bluetoothctl` (pair/connect). Leave both off if you only play to the device speaker.
 audio: true
 host_dbus: true
+# Lets the UI "Herstart" button restart the add-on via the Supervisor (POST
+# /addons/self/restart) — for changes that only apply at startup (MCP servers).
+hassio_api: true
 ingress: true
 ingress_port: 8099
 ingress_stream: true

@@ -15,6 +15,7 @@
 		<span id="conn" class="status-pill"><span class="dot"></span> connecting…</span>
 		<span id="voice-pill" class="status-pill"><span class="dot"></span> voice</span>
 		<span id="stream-pill" class="status-pill" style="margin-left:auto"><span class="dot"></span> live</span>
+		<button class="btn-ghost" id="restart-btn" onclick="restartAddon()" title="herstart de add-on (nodig na MCP-wijzigingen)">↻ Herstart</button>
 	</header>
 
 	<div class="app-shell">
@@ -415,6 +416,22 @@
 			$('mcp-note').textContent = r.note || r.error || '';
 			if (r.ok) { $('mcp-name').value = ''; $('mcp-url').value = ''; loadMcp(); }
 		});
+
+		/* ── restart add-on ── */
+		async function restartAddon() {
+			if (!confirm('Add-on herstarten? De UI verliest even verbinding.')) return;
+			const b = $('restart-btn'); b.disabled = true; b.textContent = 'Herstarten…';
+			try {
+				const r = await (await fetch('/api/restart', { method: 'POST' })).json();
+				if (r.ok === false) { alert('Herstart mislukt: ' + (r.error || '')); b.disabled = false; b.textContent = '↻ Herstart'; return; }
+			} catch { /* process is dying mid-response — expected */ }
+			// poll until it's back, then reload
+			let tries = 0;
+			const iv = setInterval(async () => {
+				try { await fetch('/api/status'); clearInterval(iv); location.reload(); }
+				catch { if (++tries > 40) clearInterval(iv); }
+			}, 1500);
+		}
 
 		/* ── Bluetooth speakers ── */
 		function btRow(d) {

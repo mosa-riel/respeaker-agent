@@ -2,8 +2,10 @@
 
 Self-owned voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3**. Talks to the device
 directly over the ESPHome native API, runs an LLM tool-calling loop fed by **multiple MCP
-servers**, renders **designed screens to a reTerminal E1001 e-paper**, and serves a local
-web UI with a live trace monitor. Replaces the fragile nested Home-Assistant chain.
+servers**, plays TTS on the device **or a host / Bluetooth speaker**, renders **designed
+screens to a reTerminal E1001 e-paper**, and serves a **paged web UI** (live pipeline +
+trace monitor, playground, Bluetooth, settings). Replaces the fragile nested
+Home-Assistant chain.
 
 LLM/STT/TTS are **OpenAI-compatible** — base URLs + model ids are config, so any
 compatible provider (Mistral by default, self-hosted later) works.
@@ -55,8 +57,12 @@ LAN port).
 - **Enable voice** — take over the device's wake-word pipeline. Stop HA's own Assist for
   this device first (only one client may own voice).
 
-LLM/STT/TTS base-urls, models, and the voice id live in the agent's **UI** (click a
-pipeline node), persisted to `/data/config.json`.
+The Configuration tab is the **source of truth for all scalar settings** — LLM/STT/TTS
+base-urls + models, rates, VAD, volume, follow-up, plus `audio_sink` and
+`bluetooth_control` (below). `addon-run.py` writes them into `/data/config.json` every
+boot. The agent **UI** keeps only what HA's static form can't do well and persists those
+itself: the **voice dropdown** (fetched from your key), `system_prompt`, `stt_extra`
+(JSON), and MCP server/tool management.
 
 ### mcp-homeassistant → Configuration
 - Leave **`ha_token`** blank and set **`ha_url`** to `http://supervisor/core` → it
@@ -76,8 +82,10 @@ funbox          http://<hostnaam>:8785/mcp
 websearch       http://<hostnaam>:8786/mcp
 screen          http://<hostnaam>:8788/mcp
 ```
-**Restart the agent after adding/changing servers** — MCPs connect at startup. The
-rollout strip turns green per connected server.
+**Restart the agent after adding/changing servers** — MCPs connect at startup. Use the
+**↻ Herstart** button in the header (restarts the add-on via the Supervisor). The rollout
+strip turns green per connected server. (Voice / prompt / `stt_extra` edits apply **live**
+— no restart.)
 
 ### Curate Home Assistant tools (important)
 `ha-mcp` exposes ~80 tools. In the `home-assistant` MCP card, enable a **lean control
@@ -88,6 +96,31 @@ ha_search_entities, ha_get_state, ha_call_service
 (Add `ha_get_todo`/`ha_set_todo_item`/`ha_remove_todo_item` for shopping-list control.)
 `ha_call_service` is the on/off workhorse; for "lights in room X" the agent searches with
 `area_filter` + `domain_filter` and calls it per entity.
+
+## Audio output & Bluetooth
+
+By default TTS plays on the reSpeaker's own speaker. Set **`audio_sink`** to play on a
+host PulseAudio sink instead — a paired Bluetooth speaker
+`bluez_sink.<MAC>.a2dp_sink`, or `"default"` for the host default. The mic stays the
+reSpeaker. (Follow-up mic-reopen rides the device path, so it's disabled in local-sink
+mode.)
+
+Turn on **`bluetooth_control`** to manage speakers from the app. The **Bluetooth** page
+(and the voice/chat tools) can **search · pair · connect · disconnect**; a successful
+connect sets `audio_sink` automatically. The add-on already grants the host access
+(`audio: true` → Supervisor PulseAudio, `host_dbus: true` → host BlueZ; image ships
+`bluez` + `pulseaudio-utils`) — verified working **in the HA add-on (Docker)**. Unpair is
+a host action: `bluetoothctl remove <MAC>`.
+
+> HA OS itself can't be a Bluetooth A2DP sink — the agent's **host adapter** owns the
+> speaker, not HA. See [voice-audio](docs/reference/voice-audio.md) + [steps/10–11](docs/steps/).
+
+## Web UI (HA ingress)
+
+Left sidebar, paged: **Home** (live voice-pipeline flow-graph) · **Live** (trace monitor)
+· **Playground** (test chat → full agent loop) · **Bluetooth** (when enabled) ·
+**Instellingen** (voice/prompt/stt_extra editable + read-only mirror of the add-on
+scalars + device status) · **MCP servers**.
 
 ## reTerminal e-paper
 

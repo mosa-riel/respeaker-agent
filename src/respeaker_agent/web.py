@@ -274,7 +274,7 @@ async def put_config(payload: dict) -> JSONResponse:
     except Exception:  # noqa: BLE001
         pass
     settings.save()
-    return JSONResponse({"ok": True, "note": "Restart the agent to apply device changes."})
+    return JSONResponse({"ok": True, "note": "Opgeslagen — direct actief."})
 
 
 @app.get("/api/home")
@@ -322,6 +322,27 @@ async def list_voices() -> JSONResponse:
         for v in items if v.get("id")
     ]
     return JSONResponse({"voices": voices})
+
+
+@app.post("/api/restart")
+async def restart_addon() -> JSONResponse:
+    """Restart the add-on via the Supervisor (for changes that only apply at startup,
+    e.g. MCP servers). Only works as an HA add-on — needs the injected SUPERVISOR_TOKEN
+    and `hassio_api: true`. The process dies mid-response, so the UI treats a dropped
+    connection as success."""
+    import httpx
+
+    token = os.getenv("SUPERVISOR_TOKEN")
+    if not token:
+        return JSONResponse({"ok": False, "error": "not running as a HA add-on (no SUPERVISOR_TOKEN)"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as cli:
+            r = await cli.post("http://supervisor/addons/self/restart",
+                               headers={"Authorization": f"Bearer {token}"})
+            r.raise_for_status()
+    except Exception as err:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(err).splitlines()[0][:160]}, status_code=502)
+    return JSONResponse({"ok": True, "note": "Herstarten…"})
 
 
 def _bt_enabled() -> bool:
