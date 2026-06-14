@@ -534,7 +534,7 @@
 					{ k: 'tts_provider', label: 'Provider (voxtral|openai)' },
 					{ k: 'tts_base_url', label: 'TTS base URL' },
 					{ k: 'tts_model', label: 'TTS model' },
-					{ k: 'tts_voice_id', label: 'Voice id' },
+					{ k: 'tts_voice_id', t: 'voices', label: 'Voice' },
 					{ k: 'tts_format', label: 'Engine-formaat (flac|pcm|wav)' },
 					{ k: 'tts_out_rate', t: 'int', label: 'Output rate (Hz)' },
 					{ k: 'voice_followup', t: 'bool', label: 'Follow-up gesprek' },
@@ -567,14 +567,34 @@
 				body.innerHTML = form.fields.map(f => {
 					const v = c[f.k] ?? '';
 					if (f.t === 'bool') return `<label class="modal-check"><input type="checkbox" data-k="${f.k}" data-t="bool" ${v ? 'checked' : ''}/> ${f.label}</label>`;
+					if (f.t === 'voices') return `<div class="field"><label class="field-label">${f.label}</label>
+						<select class="field-input" data-k="${f.k}" id="voice-select"><option value="${esc(String(v))}" selected>${v ? esc(String(v)) + ' (huidig)' : '— kies —'}</option></select>
+						<span class="muted" id="voice-hint" style="font-size:11px">voices laden…</span></div>`;
 					if (f.t === 'json') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" data-t="json" rows="3">${esc(JSON.stringify(v || {}, null, 0))}</textarea></div>`;
 					if (f.t === 'textarea') return `<div class="field"><label class="field-label">${f.label}</label><textarea class="field-input" data-k="${f.k}" rows="4">${esc(String(v))}</textarea></div>`;
 					const it = (f.t === 'int' || f.t === 'float') ? 'number' : 'text';
 					const step = f.t === 'float' ? ' step="0.05"' : '';
 					return `<div class="field"><label class="field-label">${f.label}</label><input class="field-input" data-k="${f.k}" data-t="${f.t || 'str'}" type="${it}"${step} value="${esc(String(v))}"/></div>`;
 				}).join('');
+				if (form.fields.some(f => f.t === 'voices')) populateVoices(c.tts_voice_id);
 			}
 			$('node-modal').hidden = false;
+		}
+		async function populateVoices(current) {
+			const sel = $('voice-select'), hint = $('voice-hint');
+			if (!sel) return;
+			try {
+				const r = await (await fetch('/api/voices')).json();
+				if (r.error) { hint.textContent = 'kon voices niet laden: ' + r.error + ' — vul id handmatig'; return; }
+				const cur = current || '';
+				const inList = r.voices.some(v => v.id === cur);
+				sel.innerHTML = (cur && !inList ? `<option value="${esc(cur)}" selected>${esc(cur)} (huidig, custom)</option>` : '')
+					+ r.voices.map(v => {
+						const lang = v.languages && v.languages.length ? ' · ' + v.languages.join('/') : '';
+						return `<option value="${esc(v.id)}" ${v.id === cur ? 'selected' : ''}>${esc(v.name)}${lang}</option>`;
+					}).join('');
+				hint.textContent = `${r.voices.length} voices op deze key`;
+			} catch (e) { hint.textContent = 'voices ophalen mislukt — vul id handmatig'; }
 		}
 		function closeNode() { $('node-modal').hidden = true; modalNode = null; }
 		async function saveNode() {

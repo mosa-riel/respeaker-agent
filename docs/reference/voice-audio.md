@@ -66,4 +66,8 @@ manifest; see `deployment.md`. Optional `bluetooth_control` exposes locked-down
 (`STT_API_KEY`/`TTS_API_KEY`) are `.env`-only and fall back to `LLM_API_KEY`.
 
 Current voice: `tts_voice_id = bf93b5a8-5759-4c01-8d58-204022a76bea` (user's own
-Studio-recorded voice).
+Studio-recorded voice, "Aapje"). The TTS stage settings modal shows a **voice dropdown**
+populated from `GET /api/voices` (engine `/audio/voices` with the TTS key; key never
+returned). Custom voices are **per-account** — a wrong/stale `api_key` makes the engine
+404 `invalid_voice` (looks like "TTS broken"); `voice_id` is required and there are no
+Dutch *preset* voices, so Dutch needs a custom-cloned voice on that key.

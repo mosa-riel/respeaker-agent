@@ -297,6 +297,33 @@ async def list_tools() -> JSONResponse:
     return JSONResponse(app.state.tools.specs())
 
 
+@app.get("/api/voices")
+async def list_voices() -> JSONResponse:
+    """Voices available for TTS on the configured key — powers the voice-id dropdown.
+    Calls the engine's `/audio/voices` (Mistral/Voxtral shape) with the TTS key (never
+    returned to the client). Best-effort: returns {voices: []} + an error string on
+    failure so the UI can fall back to a manual id."""
+    import httpx
+
+    settings: Settings = app.state.settings
+    secrets: Secrets = app.state.secrets
+    url = f"{settings.tts_base_url.rstrip('/')}/audio/voices"
+    headers = {"Authorization": f"Bearer {secrets.tts_api_key}"} if secrets.tts_api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as cli:
+            resp = await cli.get(url, headers=headers)
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+    except Exception as err:  # noqa: BLE001 - surface a friendly message, never the key
+        return JSONResponse({"voices": [], "error": str(err).splitlines()[0][:160]})
+    voices = [
+        {"id": v.get("id"), "name": v.get("name") or v.get("slug") or v.get("id"),
+         "languages": v.get("languages") or [], "gender": v.get("gender")}
+        for v in items if v.get("id")
+    ]
+    return JSONResponse({"voices": voices})
+
+
 @app.post("/api/run")
 async def run_agent(payload: dict) -> JSONResponse:
     """Manual prompt → full agent loop (llm → tools → … → reply). Optional `speak`
