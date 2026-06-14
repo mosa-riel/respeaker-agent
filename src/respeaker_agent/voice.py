@@ -73,6 +73,7 @@ class VoicePipeline:
         self._heard_ms = 0.0
         self._conversing = False  # in an active follow-up session
         self._chime_url: str | None = None
+        self._wake_chime_path: str | None = None  # cached wake-beep WAV for the local sink
         self.attached = False  # subscribed as the device's voice handler
         self.last_activity: str = ""  # last pipeline stage, for the UI
 
@@ -121,6 +122,8 @@ class VoicePipeline:
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
+        if self._s.wake_chime and self._s.audio_sink:
+            asyncio.create_task(self._play_wake_chime())  # cue on the BT/host speaker; don't block the mic
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         # Enter the listening phase NOW (drives the device's listening LEDs) — the
         # transcript comes later in STT_END. (Sending STT_START after speech ended
@@ -283,6 +286,22 @@ class VoicePipeline:
                 await asyncio.sleep(min(secs + 1.6, 40.0))
         self.last_activity = "klaar"
         return True
+
+    async def _play_wake_chime(self) -> None:
+        """Play the 'ready' beep on the local/Bluetooth sink at wake (wake_chime)."""
+        try:
+            if self._wake_chime_path is None:
+                import os
+                import tempfile
+                from .audio import make_wake_chime_wav
+                p = os.path.join(tempfile.gettempdir(), "respeaker_wake_chime.wav")
+                with open(p, "wb") as f:
+                    f.write(make_wake_chime_wav())
+                self._wake_chime_path = p
+            from .local_play import play_file
+            await play_file(self._wake_chime_path, self._s.audio_sink, self._trace)
+        except Exception as err:  # noqa: BLE001 - a cue must never break the turn
+            self._trace.emit("info", f"wake chime failed: {str(err)[:80]}")
 
     async def _play_chime(self) -> None:
         """Play the end-of-session chime so the user knows the mic closed."""

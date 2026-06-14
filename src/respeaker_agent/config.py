@@ -129,6 +129,11 @@ class Settings:
     # (~vad_prespeech_ms) — an end chime then signals it's closed.
     voice_followup: bool = True
     voice_end_chime: bool = True  # play a short chime when a follow-up session ends
+    # Play a short "ready" beep on the host/Bluetooth sink (audio_sink) at wake — for
+    # devices with no usable on-board speaker. UI-toggleable (not an add-on scalar), so it
+    # applies live. Needs audio_sink set. The device's own wake sound is a separate HA
+    # switch on the reSpeaker.
+    wake_chime: bool = False
     device_volume: float = 1.0  # set on the reSpeaker media player at connect (0–1)
     # Server-side end-of-speech detection (this firmware streams continuously and
     # expects the server to decide when the user stopped). Energy-based VAD on the

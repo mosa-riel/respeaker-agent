@@ -116,6 +116,7 @@
 			</div>
 			<div class="card-body">
 				<p class="muted" id="bt-sink"></p>
+				<label class="modal-check" style="margin:4px 0 12px"><input type="checkbox" id="wake-chime-tg" onchange="toggleWakeChime(this.checked)"/> Wake-beep op deze speaker (cue bij wake)</label>
 				<div id="bt-list"></div>
 				<p class="muted" id="bt-note"></p>
 			</div>
@@ -441,6 +442,10 @@
 				</div>`).join('')
 				: '<p class="muted">Nog geen opnames. Spreek de reSpeaker aan.</p>';
 		}
+		async function toggleWakeChime(on) {
+			await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wake_chime: on }) });
+			$('bt-note').textContent = on ? 'Wake-beep aan (op deze speaker).' : 'Wake-beep uit.';
+		}
 		async function playRec(name) {
 			try {
 				const r = await (await fetch('api/recordings/' + encodeURIComponent(name) + '/play', { method: 'POST' })).json();
@@ -489,6 +494,7 @@
 			$('bt-sink').innerHTML = d.audio_sink
 				? `Actieve sink: <strong>${esc(d.audio_sink)}</strong>`
 				: 'Geen sink ingesteld — TTS speelt op de reSpeaker zelf.';
+			try { const c = await (await fetch('/api/config')).json(); $('wake-chime-tg').checked = !!c.wake_chime; } catch {}
 			const list = d.devices || [];
 			$('bt-list').innerHTML = list.length ? list.map(btRow).join('')
 				: '<p class="muted">Geen bekende apparaten. Klik “Zoeken”.</p>';

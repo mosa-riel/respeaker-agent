@@ -260,7 +260,7 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    for key in {"voice_enabled", "voice_followup", "voice_end_chime"} & payload.keys():
+    for key in {"voice_enabled", "voice_followup", "voice_end_chime", "wake_chime"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
     if "stt_extra" in payload:
         if not isinstance(payload["stt_extra"], dict):
