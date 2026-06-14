@@ -98,6 +98,10 @@ class Settings:
     # noise/silence isn't blown up. Does NOT fix "hollow" (that's device DSP).
     stt_normalize: bool = True
     stt_gain_max: float = 12.0
+    # Bias the transcription toward Dutch on SHORT utterances (where Voxtral's
+    # auto-detect drifts — "wat is het weer" → French). Sent as the `prompt` field;
+    # Whisper/Voxtral continues in the prompt's language/style. Empty = off.
+    stt_prompt: str = "Dit is een Nederlands gesprek met de spraakassistent in huis."
     # Extra transcription params merged into the request (e.g. {"context_bias":
     # "Keukenkopjes,Eettafel"} to bias vocab/spelling/language). Lists/dicts are
     # JSON-encoded for the multipart form. Overrides the defaults above on conflict.

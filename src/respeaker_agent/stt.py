@@ -41,6 +41,8 @@ class STTClient:
         url = f"{self._s.stt_base_url.rstrip('/')}/audio/transcriptions"
         files = {"file": ("audio.wav", wav, "audio/wav")}
         data: dict = {"model": self._s.stt_model, "language": language}
+        if self._s.stt_prompt:
+            data["prompt"] = self._s.stt_prompt  # bias language/vocab on short clips
         # Merge user-supplied extra params (context_bias, etc.); JSON-encode complex
         # values for the multipart form. These override the defaults on conflict.
         for k, v in (self._s.stt_extra or {}).items():
