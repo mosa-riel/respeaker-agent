@@ -18,6 +18,26 @@ from typing import AsyncIterator
 from .trace import TraceBus
 
 
+async def play_file(path: str, sink: str, trace: TraceBus) -> bool:
+    """Play a WAV/audio file to PulseAudio `sink` (empty/"default" → host default sink)
+    via `paplay`. Used to audition a saved recording on the Bluetooth/local speaker."""
+    args = ["paplay"]
+    if sink and sink != "default":
+        args += ["--device", sink]
+    args.append(path)
+    try:
+        proc = await asyncio.create_subprocess_exec(*args, stderr=asyncio.subprocess.PIPE)
+    except FileNotFoundError:
+        trace.emit("error", "paplay not found (install pulseaudio-utils)", level="error")
+        return False
+    rc = await proc.wait()
+    if rc != 0:
+        err = (await proc.stderr.read()).decode(errors="replace").strip()[:200] if proc.stderr else ""
+        trace.emit("error", f"paplay rc={rc}: {err}", level="error")
+        return False
+    return True
+
+
 async def play_pcm_stream(
     chunks: AsyncIterator[bytes],
     sink: str,

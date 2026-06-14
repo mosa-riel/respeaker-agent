@@ -435,10 +435,17 @@
 			$('rec-list').innerHTML = list.length ? list.map(r => `
 				<div class="rec-item">
 					<div class="rec-meta"><span class="rec-text">${esc(r.text || '(leeg)')}</span>
-						<span class="muted">${r.seconds}s</span></div>
-					<audio controls preload="none" src="/api/recordings/${esc(r.name)}"></audio>
+						<span class="muted">${r.seconds}s</span>
+						<button class="btn-ghost" onclick="playRec('${esc(r.name)}')" title="speel af op de speaker (BT/lokaal)">▶ Speaker</button></div>
+					<audio controls preload="none" src="api/recordings/${esc(r.name)}"></audio>
 				</div>`).join('')
 				: '<p class="muted">Nog geen opnames. Spreek de reSpeaker aan.</p>';
+		}
+		async function playRec(name) {
+			try {
+				const r = await (await fetch('api/recordings/' + encodeURIComponent(name) + '/play', { method: 'POST' })).json();
+				if (r.ok === false) alert('Afspelen mislukt: ' + (r.error || '') + ' (sink: ' + (r.sink || '?') + ')');
+			} catch (e) { alert('Afspelen mislukt: ' + e); }
 		}
 
 		/* ── restart add-on ── */

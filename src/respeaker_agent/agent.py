@@ -124,6 +124,7 @@ class AgentLoop:
             return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
 
     async def _chat(self, cli: httpx.AsyncClient, messages: list[dict[str, Any]], specs: list[dict] | None, force: bool) -> dict[str, Any]:
+        messages = _drop_empty_assistant(messages)
         body: dict[str, Any] = {"model": self._s.llm_model, "messages": messages}
         if specs:
             body["tools"] = specs
@@ -145,7 +146,18 @@ class AgentLoop:
                     self._trace.emit("info", f"LLM {resp.status_code}; retry in {delay:.1f}s", level="warn")
                     await asyncio.sleep(delay)
                     continue
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Surface the provider's actual reason (Mistral 400 explains *why* the
+                    # payload was rejected — e.g. malformed messages/tool pairing).
+                    detail = ""
+                    try:
+                        body_json = resp.json()
+                        detail = body_json.get("message") or body_json.get("error") or resp.text[:400]
+                    except Exception:  # noqa: BLE001
+                        detail = resp.text[:400]
+                    self._trace.emit("error", f"LLM {resp.status_code}: {detail}", level="error",
+                                     data={"status": resp.status_code, "detail": str(detail)[:1000]})
+                    resp.raise_for_status()
                 data = resp.json()
                 break
             except httpx.HTTPError as err:
@@ -155,6 +167,19 @@ class AgentLoop:
         self._trace.emit("llm-rsp", (msg.get("content") or "").strip() or "(tool call)", direction="in",
                          data={"finish": data["choices"][0].get("finish_reason"), "tool_calls": msg.get("tool_calls")})
         return msg
+
+
+def _drop_empty_assistant(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mistral 400s on an assistant message with neither content nor tool_calls — the
+    model sometimes ends a turn empty (e.g. after a failed tool), and that empty turn
+    gets stored in history and replayed forever. Strip those before sending. Safe: no
+    `tool` message references an assistant turn that has no tool_calls."""
+    return [
+        m for m in messages
+        if not (m.get("role") == "assistant"
+                and not (m.get("content") or "").strip()
+                and not m.get("tool_calls"))
+    ]
 
 
 class ConversationStore:

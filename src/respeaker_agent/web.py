@@ -339,6 +339,22 @@ async def get_recording(name: str) -> Response:
     return FileResponse(str(p), media_type="audio/wav", filename=f"{name}.wav")
 
 
+@app.post("/api/recordings/{name}/play")
+async def play_recording(name: str) -> JSONResponse:
+    """Play a saved recording on the host speaker (the configured `audio_sink`, e.g. a
+    Bluetooth speaker, or the host default) — auditioning capture quality at volume,
+    independent of the browser."""
+    from . import recordings
+    from .local_play import play_file
+
+    p = recordings.path_for(name)
+    if p is None:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    sink = app.state.settings.audio_sink
+    ok = await play_file(str(p), sink, app.state.trace)
+    return JSONResponse({"ok": ok, "sink": sink or "default"})
+
+
 async def _supervisor_restart_soon() -> None:
     """Fire the Supervisor self-restart AFTER our response has been sent. The restart
     kills this container; doing it inline would cut the HTTP response (and the killed
