@@ -161,10 +161,10 @@ class Settings:
     # (mic re-open without wake word) is driven by the device's announce path, so it's
     # disabled in local-sink mode — wake the device per turn. "default" = host default sink.
     audio_sink: str = ""
-    # Lead silence (ms) prepended to anything played on a local/Bluetooth sink. A
-    # suspended A2DP sink takes ~0.5–1s to wake; without this it clips the first second
-    # of the chime/TTS. 0 = off (use for a wired/always-on sink).
-    bt_lead_silence_ms: int = 700
+    # Lead silence (ms) prepended to local/Bluetooth playback. With the silence keepalive
+    # (which pins the sink open so it never suspends) a small value suffices; raise it if
+    # you still hear a clipped first syllable. 0 = off.
+    bt_lead_silence_ms: int = 200
     # Host Bluetooth control: OPT-IN. Exposes locked-down `bluetoothctl` agent tools
     # (scan/list/connect/disconnect) so you can re-pair a speaker by voice/UI. The
     # binary is fixed, the sub-command allowlisted, and the only free arg is a

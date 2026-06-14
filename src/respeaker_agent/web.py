@@ -69,6 +69,10 @@ async def lifespan(app: FastAPI):
     app.state.audio_srv = audio_srv
     voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, mcp, audio_srv)
     app.state.voice = voice
+    app.state.keepalive = None
+    if settings.audio_sink:
+        from .local_play import start_silence_keepalive
+        app.state.keepalive = await start_silence_keepalive(settings.audio_sink, trace)
     if settings.voice_enabled:
         audio_srv.start(settings.device_host, settings.tts_audio_host or None)  # LAN audio server for TTS playback
         link.post_connect = voice.attach  # (re)subscribe as voice handler on connect
@@ -83,6 +87,11 @@ async def lifespan(app: FastAPI):
     finally:
         refresh_task.cancel()
         voice.detach()
+        if app.state.keepalive is not None:
+            try:
+                app.state.keepalive.terminate()
+            except ProcessLookupError:
+                pass
         audio_srv.stop()
         await mcp.stop()
         await link.stop()

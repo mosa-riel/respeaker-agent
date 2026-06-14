@@ -18,6 +18,26 @@ from typing import AsyncIterator
 from .trace import TraceBus
 
 
+async def start_silence_keepalive(sink: str, trace: TraceBus):
+    """Hold a (Bluetooth) sink open with an endless silence stream so it never suspends —
+    instant playback, no first-second clip, no resume lag. PulseAudio mixes real audio
+    over this. Returns the subprocess (terminate on shutdown) or None."""
+    if not sink:
+        return None
+    args = ["paplay", "--raw", "--format=s16le", "--rate=48000", "--channels=1"]
+    if sink != "default":
+        args += ["--device", sink]
+    args.append("/dev/zero")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdin=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        trace.emit("info", f"sink keepalive on {sink} (no suspend → instant playback)")
+        return proc
+    except FileNotFoundError:
+        trace.emit("info", "paplay not found; no sink keepalive")
+        return None
+
+
 async def play_file(path: str, sink: str, trace: TraceBus, *, lead_ms: int = 0) -> bool:
     """Play a WAV/FLAC file to PulseAudio `sink` (empty/"default" → host default sink).
     With lead_ms > 0, prepend that much silence so a suspended Bluetooth sink wakes up
