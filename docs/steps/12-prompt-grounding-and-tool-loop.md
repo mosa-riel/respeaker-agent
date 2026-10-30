@@ -93,3 +93,14 @@ other MCP add-ons.
   (seen live: `light.keuken_plafondlamp` in "zet alle lichten beneden aan").
 - The device list starts with the floors (`Begane grond (niveau 0): Eetkamer, Hal, …`), so
   "beneden"/"boven" map to real rooms instead of a guess.
+
+## Qwen3 list arguments (0.4.18)
+
+Live on Qwen3-235b (hostyourai): "Welke lampen staan er beneden aan?" took 4 rounds,
+7.8 s. Qwen sent `entity_id='["light.a", "light.b"]'` (a JSON string); ha-mcp looked up
+one entity with that name, failed, and Qwen fell back to one call per lamp.
+`mcp_client._decode_json_args` now decodes such strings when the property's schema
+allows an array or object.
+
+Live numbers on Qwen (0.4.17, before this fix), same questions as above: eetkamer 2.9 s,
+badkamer temperature 2.5 s, keuken list 2.5 s, joke 1.2 s, time 1.2 s.

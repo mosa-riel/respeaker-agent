@@ -153,10 +153,32 @@ class McpManager:
 
         async def handler(args: dict[str, Any]) -> Any:
             # Forced args win over whatever the model passed (e.g. include_hidden=false).
-            result = await session.call_tool(original, {**args, **forced})
+            result = await session.call_tool(original, {**_decode_json_args(args, params), **forced})
             return _result_to_json(result)
 
         return Tool(name=qualified, description=desc, parameters=params, handler=handler)
+
+
+def _decode_json_args(args: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    """Some models (Qwen3) send a list as JSON text: entity_id='["light.a", "light.b"]'.
+    ha-mcp then looks up one entity named after the whole string. Decode such strings
+    when the property's schema allows an array or object; leave everything else alone."""
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    out = dict(args)
+    for key, val in args.items():
+        if isinstance(val, str) and val.lstrip()[:1] in ("[", "{") and _allows(props.get(key, {}), {"array", "object"}):
+            try:
+                out[key] = json.loads(val)
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def _allows(prop: dict[str, Any], types: set[str]) -> bool:
+    t = prop.get("type")
+    if (isinstance(t, str) and t in types) or (isinstance(t, list) and types & set(t)):
+        return True
+    return any(_allows(p, types) for p in (prop.get("anyOf") or []) + (prop.get("oneOf") or []) if isinstance(p, dict))
 
 
 def _result_to_json(result: Any) -> Any:
