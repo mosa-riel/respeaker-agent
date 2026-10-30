@@ -19,6 +19,10 @@ why device turns took 2–3 LLM rounds and why answers sometimes did odd things.
 - **One conversation for every wake.** The firmware sends no conversation id, so all
   voice turns share `"voice"` with a 10-minute TTL: a new question minutes later still
   carried the previous session as history.
+- **Wrong rooms in the device list.** HomeContext took each entity's room from its
+  *device*, ignoring the entity's own area. One bridge device carries entities from
+  several rooms: all Somfy RTS shutters landed in Hal (bedroom shutters included) and
+  the ZHA group `light.keuken_kopjes` in Meterkast (the coordinator's area).
 - **Markdown reached TTS** (`**21,1 graden**`).
 - Dead code: `echo`/`get_time` demo tools (sent as specs on every call), `_compact`,
   `sources_summary`.
@@ -31,6 +35,9 @@ why device turns took 2–3 LLM rounds and why answers sometimes did odd things.
   search only for what is not in the list. `temperature` is sent. Tool calls of one
   round run concurrently (`asyncio.gather`), results appended in call order.
   `_speakable()` strips `*`, backticks and heading markers from the reply.
+- `home_context.py`: reads the entity registry (`ha_get_entity`, batches of 50); the
+  entity's own `area_id` wins over the device's, and HA aliases are listed as
+  `(ook: …)` so the model matches spoken names.
 - `voice.py`: gets the HomeContext instead of the MCP manager; clears the
   conversation when a follow-up session ends (no reply → mic closes), so the next
   wake starts fresh. A reply keeps history for the follow-up.
@@ -42,7 +49,8 @@ why device turns took 2–3 LLM rounds and why answers sometimes did odd things.
 
 Offline: fake LLM + fake tools — prompt contents, `temperature` in every request,
 three 0.5 s tools finish in 0.5 s, tool messages keep call order, markdown stripped,
-history cleared at session end and kept for a follow-up.
+history cleared at session end and kept for a follow-up; HomeContext puts an entity
+in its own area over its device's and lists aliases.
 
 Live (read-only questions via `/api/run`, before):
 

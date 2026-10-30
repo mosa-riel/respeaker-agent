@@ -66,6 +66,7 @@ class HomeContext:
             names = await self._friendly_names(exposed)  # entity_id -> friendly name
             areas = await self._area_names()             # area_id -> name
             ent2area = await self._entity_to_area()       # entity_id -> area_id (via device)
+            registry = await self._entity_registry(exposed)  # entity_id -> own area + aliases
         except Exception as err:  # noqa: BLE001
             self._trace.emit("error", f"home context refresh failed: {err}", level="error")
             return self.entity_count
@@ -74,10 +75,16 @@ class HomeContext:
         for eid in exposed:
             dom = eid.split(".", 1)[0]
             label = DOMAIN_TYPE.get(dom, dom)
-            room = areas.get(ent2area.get(eid, ""), NO_ROOM)
+            entry = registry.get(eid, {})
+            # The entity's own area wins over its device's, as in HA: one bridge device
+            # (Somfy RTS, the Zigbee coordinator for ZHA groups) carries entities that
+            # live in other rooms.
+            room = areas.get(entry.get("area_id") or ent2area.get(eid, ""), NO_ROOM)
+            aliases = [a for a in entry.get("aliases") or [] if a]
+            also = f" (ook: {'; '.join(aliases)})" if aliases else ""
             # Include the entity_id so the model can call tools directly — no search
             # round, no guessing a (wrong) id.
-            rooms.setdefault(room, []).append(f"{names.get(eid, eid)} [{eid}] ({label})")
+            rooms.setdefault(room, []).append(f"{names.get(eid, eid)} [{eid}] ({label}){also}")
         if not rooms:
             return self.entity_count
 
@@ -131,6 +138,17 @@ class HomeContext:
             if not data.get("has_more"):
                 break
             offset = data.get("next_offset") or (offset + len(devices))
+        return out
+
+    async def _entity_registry(self, ids: set[str]) -> dict[str, dict[str, Any]]:
+        """entity_id -> entity registry entry (`area_id` override, `aliases`), in batches."""
+        out: dict[str, dict[str, Any]] = {}
+        todo = sorted(ids)
+        for i in range(0, len(todo), 50):
+            data = _data(await self._mgr.call_raw(self._server, "ha_get_entity", {"entity_id": todo[i:i + 50]}))
+            for entry in data.get("entity_entries", []) or []:
+                if entry.get("entity_id"):
+                    out[entry["entity_id"]] = entry
         return out
 
     async def _exposed(self) -> set[str]:
