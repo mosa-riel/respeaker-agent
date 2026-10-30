@@ -16,6 +16,8 @@ RUN apt-get update \
 ADD "https://api.github.com/repos/mosa-riel/respeaker-agent/commits/master" /tmp/commit.json
 RUN git clone --depth 1 "https://github.com/mosa-riel/respeaker-agent" /app
 WORKDIR /app
-RUN pip install .
+# Install the exact versions from uv.lock (exported to requirements.lock): a bare
+# `pip install .` resolved to whatever was newest and broke on mcp 2.x.
+RUN pip install -r requirements.lock && pip install --no-deps .
 EXPOSE 8099 8731
 CMD ["python", "/app/addon-run.py"]

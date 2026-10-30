@@ -1262,7 +1262,7 @@ requires-dist = [
     { name = "ddgs", specifier = ">=9.14.4" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.27.2" },
+    { name = "mcp", specifier = ">=1.27.2,<2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
