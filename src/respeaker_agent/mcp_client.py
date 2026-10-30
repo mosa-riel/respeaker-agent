@@ -80,9 +80,9 @@ class McpManager:
         chain is entered and exited in THIS task (anyio requirement for streamable-HTTP)."""
         try:
             if srv.transport == "http":
-                from mcp.client.streamable_http import streamablehttp_client
+                from mcp.client.streamable_http import streamable_http_client
 
-                async with streamablehttp_client(srv.url) as (read, write, _):
+                async with streamable_http_client(srv.url) as (read, write):
                     async with ClientSession(read, write) as session:
                         await self._register(srv, session)
                         ready.set()
@@ -133,7 +133,7 @@ class McpManager:
                 continue
             qualified = f"{_slug(srv.name)}__{t.name}"
             overrides = (srv.tool_arg_overrides or {}).get(t.name, {})
-            self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.inputSchema or {}, overrides))
+            self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.input_schema or {}, overrides))
             exposed.append(qualified)
         self._sessions[srv.name] = session
         self.status[srv.name] = {
@@ -164,9 +164,9 @@ def _result_to_json(result: Any) -> Any:
     model. Sends the data ONCE: prefer the structured object (servers like ha-mcp also
     return it doubly-escaped in the text content — don't ship both). Strips ha-mcp's
     repeated `metadata` noise (timezone/notes) and unwraps a lone `{"data": …}`."""
-    is_err = bool(getattr(result, "isError", False))
+    is_err = bool(getattr(result, "is_error", False))
 
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None)
     if structured is None:
         # No structured payload — use the text, parsed back to JSON if possible so it
         # isn't a doubly-escaped string to the model.
