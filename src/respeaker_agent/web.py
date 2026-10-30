@@ -26,7 +26,7 @@ from .device import DeviceLink
 from .home_context import HomeContext
 from .mcp_client import McpManager
 from .stt import STTClient
-from .tools import demo_registry
+from .tools import ToolRegistry
 from .bluetooth import bluetooth_tools, bt_list, bt_scan, bt_connect, bt_disconnect
 from .trace import TraceBus
 from .tts import make_tts
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     secrets = Secrets.from_env()
     trace = TraceBus()
     link = DeviceLink(settings, secrets, trace)
-    tools = demo_registry()
+    tools = ToolRegistry()
     for t in bluetooth_tools(settings, trace):  # host BT control (opt-in; empty otherwise)
         tools.add(t)
     app.state.settings = settings
@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     app.state.home_ctx = home_ctx
     audio_srv = TTSAudioServer(settings.tts_audio_port)
     app.state.audio_srv = audio_srv
-    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, mcp, audio_srv)
+    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx, audio_srv)
     app.state.voice = voice
     app.state.keepalive = None
     if settings.audio_sink:
@@ -445,7 +445,7 @@ async def run_agent(payload: dict) -> JSONResponse:
         result = await app.state.agent.run(
             text,
             history=convos.get(conv_id),
-            context=app.state.mcp.sources_summary(),
+            context=app.state.home_ctx.get(),
             force_tool=bool(payload.get("force_tool")),
         )
     except Exception as err:  # noqa: BLE001 - surface to UI, already traced

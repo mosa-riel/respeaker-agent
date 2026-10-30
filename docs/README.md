@@ -9,6 +9,7 @@ Same two-kind policy as the parent project:
 
 ### Steps
 - [01 — Scaffold & live monitor](steps/01-scaffold-and-live-monitor.md)
+- [12 — Device list back in the prompt + tool-loop fixes](steps/12-prompt-grounding-and-tool-loop.md)
 
 ### Reference
 - [Security review](reference/security.md)

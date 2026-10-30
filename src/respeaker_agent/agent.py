@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -57,38 +58,38 @@ class AgentLoop:
         context: str | None = None,
     ) -> AgentResult:
         # `history` = prior turns (user/assistant/tool messages, NO system) so
-        # follow-ups like "ja" / "doe maar" keep context. `context` = live home
-        # overview injected fresh each turn so it never goes stale (phase 4).
+        # follow-ups like "ja" / "doe maar" keep context. `context` = the cached,
+        # room-grouped device list (HomeContext) with entity_ids, so device commands go
+        # straight to ha_call_service/ha_get_state without a search round. ~1k tokens —
+        # far less than the tool specs, and it saves a whole LLM round per command.
         system = self._s.system_prompt
+        system += f"\n\nHet is nu {_now_nl()}."
         # Tool-usage rules appended at RUNTIME so they always apply, even if a stored
         # system_prompt (frozen in config) is out of date.
         system += (
             "\n\n=== TOOLGEBRUIK ===\n"
-            "- Apparaten in een ruimte (bv. 'alle lampen in de keuken'): roep "
-            "ha_search_entities aan met area_filter=<ruimtenaam> én domain_filter (bv. "
-            "'light'). Gebruik area_filter — zet GEEN losse woorden als 'lamp' in query "
-            "(dat geeft fuzzy ruis en verkeerde apparaten). Bedien dan ALLE treffers.\n"
-            "- ha_call_service: entity_id is precies ÉÉN string. Voor meerdere apparaten "
-            "doe je parallelle calls (één per entity_id) — geef NOOIT een lijst.\n"
-            "- ha_search_entities geeft de state (aan/uit) al terug. Roep ha_get_state "
-            "NIET nog eens aan voor aan/uit — alleen als je extra details/attributen nodig "
-            "hebt.\n"
-            "- Negeer zoektreffers waarvan entity_id/naam de gevraagde ruimte niet bevat."
+            "- Bedienen (aan/uit, dimmen, openen/dicht): roep METEEN ha_call_service aan "
+            "met de entity_id uit de apparatenlijst. Vraag de staat niet eerst op en zoek "
+            "niet eerst. Het toolresultaat is je bevestiging — niet nog eens controleren.\n"
+            "- Een hele ruimte (bv. 'alle lampen in de keuken'): bedien ALLE passende "
+            "entity_ids van die ruimte uit de lijst.\n"
+            "- ha_call_service: entity_id is precies ÉÉN string. Meerdere apparaten = "
+            "meerdere calls in dezelfde beurt — geef NOOIT een lijst.\n"
+            "- Staat of meetwaarde (is X aan, temperatuur): ha_get_state met de entity_id "
+            "uit de lijst; meerdere tegelijk mag als lijst.\n"
+            "- Staat iets niet in de lijst: ha_search_entities met area_filter=<ruimte> "
+            "en/of domain_filter (geen losse woorden als 'lamp' in query) en negeer "
+            "treffers buiten de gevraagde ruimte. Vind je het niet, zeg dat dan."
         )
         if context:
-            system += (
-                f"\n\n=== TOOL-BRONNEN ===\n{context}\n"
-                "Kies de juiste tool per vraag. Je kent de apparaten NIET uit je hoofd: "
-                "gebruik de zoek-/lijst-tool van home-assistant om het juiste apparaat "
-                "+ entity_id te vinden, en de staat-tool voor de actuele staat. Verzin "
-                "nooit een apparaat, entity_id of resultaat."
-            )
+            system += f"\n\n=== APPARATEN ===\n{context}"
         convo: list[dict[str, Any]] = list(history or [])  # everything after system
         convo.append({"role": "user", "content": user_text})
         specs = self._tools.specs()
         executed: list[dict[str, Any]] = []
 
         def _result(text: str, rounds: int) -> AgentResult:
+            text = _speakable(text)
             convo.append({"role": "assistant", "content": text})
             return AgentResult(text=text, rounds=rounds, tool_calls=executed, messages=convo)
 
@@ -102,14 +103,12 @@ class AgentLoop:
                 # Keep the assistant turn (with its tool_calls) in the history.
                 convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
 
-                # Execute EVERY requested call (there can be more than one).
-                for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    name = fn.get("name", "")
-                    args = _parse_args(fn.get("arguments"))
-                    self._trace.emit("tool", f"→ {name}", direction="out", data={"name": name, "args": args})
-                    result = await self._tools.dispatch(name, args)
-                    self._trace.emit("tool", f"← {name}", direction="in", data={"name": name, "result": result})
+                # Execute EVERY requested call (there can be more than one), concurrently —
+                # "all lights in the kitchen" is N calls in one round; don't run them in series.
+                calls = [(tc, tc.get("function", {}).get("name", ""), _parse_args(tc.get("function", {}).get("arguments")))
+                         for tc in tool_calls]
+                results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
+                for (tc, name, args), result in zip(calls, results):
                     executed.append({"name": name, "args": args, "result": result})
                     convo.append({
                         "role": "tool",
@@ -123,9 +122,15 @@ class AgentLoop:
             final = await self._chat(cli, [{"role": "system", "content": system}] + convo, None, False)
             return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
 
+    async def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
+        self._trace.emit("tool", f"→ {name}", direction="out", data={"name": name, "args": args})
+        result = await self._tools.dispatch(name, args)
+        self._trace.emit("tool", f"← {name}", direction="in", data={"name": name, "result": result})
+        return result
+
     async def _chat(self, cli: httpx.AsyncClient, messages: list[dict[str, Any]], specs: list[dict] | None, force: bool) -> dict[str, Any]:
         messages = _drop_empty_assistant(messages)
-        body: dict[str, Any] = {"model": self._s.llm_model, "messages": messages}
+        body: dict[str, Any] = {"model": self._s.llm_model, "messages": messages, "temperature": self._s.llm_temperature}
         if specs:
             body["tools"] = specs
             body["tool_choice"] = "any" if force else "auto"
@@ -201,7 +206,7 @@ class ConversationStore:
         return ent["messages"]
 
     def update(self, conv_id: str, messages: list[dict[str, Any]]) -> None:
-        # Store only the conversational gist — not the intra-turn tool churn. See _compact.
+        # Store only the conversational gist — not the intra-turn tool churn. See _compact_history.
         self._store[conv_id] = {"messages": _trim(_compact_history(messages), self._max), "ts": time.time()}
 
     def clear(self, conv_id: str) -> None:
@@ -265,9 +270,22 @@ def _last_user(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _compact(obj: Any) -> str:
-    s = json.dumps(obj, ensure_ascii=False, default=str) if not isinstance(obj, str) else obj
-    return s[:120]
+_DAGEN = ("maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag")
+_MAANDEN = ("januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
+            "september", "oktober", "november", "december")
+
+
+def _now_nl() -> str:
+    """Local date + time in Dutch for the prompt — answers "hoe laat / welke dag" without
+    a tool round. Spelled out by hand: the slim image has no nl_NL locale."""
+    t = time.localtime()
+    return f"{_DAGEN[t.tm_wday]} {t.tm_mday} {_MAANDEN[t.tm_mon - 1]} {t.tm_year}, {t.tm_hour:02d}:{t.tm_min:02d}"
+
+
+def _speakable(text: str) -> str:
+    """The reply is read aloud: drop markdown markers the model sometimes adds despite
+    the prompt (`**21 graden**` would otherwise reach TTS)."""
+    return re.sub(r"\*+|`+|^#+\s*", "", text, flags=re.M).strip()
 
 
 def _safe(err: Exception) -> str:

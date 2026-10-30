@@ -29,6 +29,7 @@ from .audio import flac_duration_seconds
 from .local_play import play_pcm_stream
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
+from .home_context import HomeContext
 from .stt import STTClient
 from .trace import TraceBus
 from .tts import TTSClient
@@ -49,7 +50,7 @@ class VoicePipeline:
         agent: AgentLoop,
         tts: TTSClient,
         convos: ConversationStore,
-        mcp: Any,
+        home: HomeContext,
         audio_srv: TTSAudioServer,
     ) -> None:
         self._s = settings
@@ -58,7 +59,7 @@ class VoicePipeline:
         self._agent = agent
         self._tts = tts
         self._convos = convos
-        self._mcp = mcp  # McpManager — for the per-source tool summary
+        self._home = home  # cached device list for the prompt
         self._audio_srv = audio_srv
         self._cli: APIClient | None = None
         self._unsub: Any = None
@@ -211,8 +212,13 @@ class VoicePipeline:
             # Chime so you hear the mic shut. (Only meaningful with follow-up on.)
             session_end = self._s.voice_followup and not replied
             self._run_end()
-            if session_end and self._s.voice_end_chime:
-                await self._play_chime()
+            if session_end:
+                # The firmware reuses one conversation id ("voice") for every wake, so
+                # without this a new question minutes later still carries the previous
+                # session as history. Mic closed = conversation over.
+                self._convos.clear(self._conv_id)
+                if self._s.voice_end_chime:
+                    await self._play_chime()
             self._conversing = False
             self._reset()
 
@@ -242,7 +248,7 @@ class VoicePipeline:
 
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
-        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._mcp.sources_summary())
+        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get())
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
         if not result.text:

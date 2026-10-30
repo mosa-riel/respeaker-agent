@@ -55,10 +55,9 @@ class Settings:
     device_port: int = 6053
     llm_base_url: str = "https://api.mistral.ai/v1"
     llm_model: str = "mistral-medium-latest"
-    # Reusable, generic guidance. The home's areas/devices and the actual tool
-    # NAMES are NOT hardcoded here — they come from the home-assistant MCP server
-    # and get injected per-conversation as a context block (phase 4). Keep this
-    # prompt tool-name-agnostic.
+    # Reusable, generic guidance. The home's areas/devices are NOT hardcoded here —
+    # the device list comes from HA (HomeContext) and the tool rules are appended at
+    # runtime (agent.py), both per turn. Keep this prompt tool-name-agnostic.
     system_prompt: str = (
         "Je bent de spraakassistent van dit huis. Antwoord altijd in het Nederlands, "
         "in spreektaal en kort — je antwoord wordt hardop voorgelezen, dus geen "
@@ -74,12 +73,6 @@ class Settings:
         "hoofd. Twijfel je? Gebruik een tool of zeg dat je het niet zeker weet.\n"
         "- Vraag om een ruimte als een opdracht meerdere apparaten kan betreffen, "
         "tenzij er maar één van dat type is.\n"
-        "Apparaten in een RUIMTE (bv. 'alle lampen in de keuken'): gebruik "
-        "ha_search_entities met area_filter=<ruimtenaam> en domain_filter (bv. 'light'). "
-        "area_filter matcht exact op gebied — gebruik dat, NIET losse woorden als 'lamp' "
-        "in de query (dat geeft fuzzy ruis en verkeerde apparaten). Bedien dan ALLE "
-        "gevonden entiteiten. Zijn er meer treffers dan getoond (has_more), verhoog limit "
-        "of verfijn; handel niet op een onvolledige lijst.\n"
         "Algemene kennisvragen (niet over dit huis) mag je gewoon eerlijk beantwoorden."
     )
     max_tool_rounds: int = 5
