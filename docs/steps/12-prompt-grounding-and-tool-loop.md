@@ -52,15 +52,28 @@ three 0.5 s tools finish in 0.5 s, tool messages keep call order, markdown strip
 history cleared at session end and kept for a follow-up; HomeContext puts an entity
 in its own area over its device's and lists aliases.
 
-Live (read-only questions via `/api/run`, before):
+Live (read-only questions via `/api/run`, mistral-medium-latest, full 21-tool set):
 
-| Question | Before |
-|---|---|
-| Is de lamp in de eetkamer aan? | 4.7 s, 2 rounds (search) |
-| Hoe warm is het in de badkamer? | 8.0 s, 3 rounds (search → get_state) |
-| Welke lampen zijn er in de keuken? | 4.7 s, 2 rounds (search) |
-| Hoe laat is het? | 2 rounds (get_time) |
-| Vertel een kort mopje | 2.5 s, 1 round |
+| Question | Before (0.4.13) | After (0.4.16) |
+|---|---|---|
+| Is de lamp in de eetkamer aan? | 4.7 s, 2 rounds (search) | 5.0 s, 2 rounds (direct get_state) |
+| Hoe warm is het in de badkamer? | 8.0 s, 3 rounds (search → get_state) | 5.3 s, 2 rounds |
+| Welke lampen zijn er in de keuken? | 4.7 s, 2 rounds (search) | 2.7 s, 1 round (from the list) |
+| Hoe laat is het? | 2 rounds (get_time) | 2.5 s, 1 round |
+| Vertel een kort mopje | 2.5 s, 1 round | 2.6 s, 1 round |
+
+The remaining time is mostly tool specs: the same questions with the trimmed tool set
+(see Open) ran 3.5 s / 0.8 s for a state question / joke in an offline harness.
+
+## Deploy incident (0.4.14 → 0.4.15 → 0.4.16)
+
+0.4.14 rebuilt with a bare `pip install .`, which pulled mcp 2.3.0 (`mcp>=1.27.2` had
+no upper bound): `streamablehttp_client` is gone in mcp 2, so no MCP server connected.
+0.4.15: the Dockerfile installs `requirements.lock` (exported from `uv.lock`, `make
+lock`), mcp capped below 2. 0.4.16: ported to mcp 2.x — `streamable_http_client`
+yields `(read, write)`; result/tool fields are snake_case (`structured_content`,
+`is_error`, `input_schema`). Works against ha-mcp 7.6.0 (the MCP add-on) and the
+other MCP add-ons.
 
 ## Open (config, not code)
 
