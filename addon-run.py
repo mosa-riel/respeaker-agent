@@ -1,7 +1,8 @@
 """Home Assistant add-on entrypoint for the reSpeaker agent.
 
 Bridges HA add-on conventions to the app:
-  - maps the `api_key` option → the LLM/STT/TTS secret env vars the app reads;
+  - maps the `api_key` (STT/TTS, and LLM by default) and optional `llm_api_key` options
+    → the secret env vars the app reads;
   - applies network-critical options (device_host, tts_audio_host) every boot;
   - seeds /data/config.json on first boot, enforces the ingress bind, then launches.
 
@@ -35,14 +36,18 @@ def _load(path: str) -> dict:
 def main() -> None:
     opts = _load(OPTIONS)
 
-    # API key → secret env (Secrets.from_env reads these; STT/TTS fall back to LLM key).
-    # Provider-agnostic: any OpenAI-compatible endpoint's key (configured in config.json).
+    # API keys → secret env (Secrets.from_env reads these). `api_key` serves STT/TTS and,
+    # unless `llm_api_key` is set, the LLM too — so the LLM can sit at another
+    # OpenAI-compatible provider than the speech endpoints.
     key = opts.get("api_key") or opts.get("mistral_api_key") or ""
+    llm_key = opts.get("llm_api_key") or key
+    if llm_key:
+        os.environ["LLM_API_KEY"] = llm_key
     if key:
-        os.environ["LLM_API_KEY"] = key
         os.environ.setdefault("STT_API_KEY", key)
         os.environ.setdefault("TTS_API_KEY", key)
-        print(f"[addon-run] api_key applied (len={len(key)}, …{key[-4:]})")
+    if llm_key or key:
+        print(f"[addon-run] keys applied (api_key len={len(key)}, llm_api_key {'own' if opts.get('llm_api_key') else 'same as api_key'})")
     else:
         print("[addon-run] WARNING: no api_key option set — LLM calls will 401")
 

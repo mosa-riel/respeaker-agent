@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.4.16"
+version: "0.4.17"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -45,6 +45,7 @@ ports_description:
 # server/tool management. web_host/web_port are NOT options (ingress bind is enforced).
 options:
   api_key: ""
+  llm_api_key: ""
   device_host: 192.168.18.151
   device_port: 6053
   llm_base_url: https://api.mistral.ai/v1
@@ -81,6 +82,7 @@ options:
   save_recordings: true
 schema:
   api_key: "password?"
+  llm_api_key: "password?"
   device_host: str
   device_port: int(1,65535)
   llm_base_url: url

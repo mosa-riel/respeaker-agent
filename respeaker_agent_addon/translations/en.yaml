@@ -1,7 +1,10 @@
 configuration:
   api_key:
     name: API key
-    description: Your OpenAI-compatible provider key (e.g. Mistral). Used for LLM/STT/TTS.
+    description: Your OpenAI-compatible provider key (e.g. Mistral). Used for STT/TTS, and for the LLM unless an LLM API key is set.
+  llm_api_key:
+    name: LLM API key
+    description: Optional key for a different LLM provider (llm_base_url). Empty = use the API key.
   device_host:
     name: reSpeaker IP
     description: IP address of the reSpeaker device (e.g. 192.168.18.151). Use the IP, not the .local name.
