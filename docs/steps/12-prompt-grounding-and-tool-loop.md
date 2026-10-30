@@ -83,3 +83,13 @@ other MCP add-ons.
   ~17k chars of specs per call, and `ha_set_entity` reads like "set state".
 - `ha_call_service` is still unrestricted (step 06 open item): a service-domain
   allowlist on the call path.
+
+## Follow-up (0.4.17)
+
+- `llm_api_key` add-on option: the LLM can sit at another provider (hostyourai, Qwen3-235b)
+  while `api_key` keeps serving STT/TTS (Voxtral at Mistral).
+- HomeContext drops exposed entity ids that HA has no state for. Assist exposure outlives
+  deleted entities; a `ha_call_service` on such a ghost waited 10 s for a state change
+  (seen live: `light.keuken_plafondlamp` in "zet alle lichten beneden aan").
+- The device list starts with the floors (`Begane grond (niveau 0): Eetkamer, Hal, …`), so
+  "beneden"/"boven" map to real rooms instead of a guess.

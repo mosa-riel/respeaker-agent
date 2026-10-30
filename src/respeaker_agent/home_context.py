@@ -63,13 +63,21 @@ class HomeContext:
             if not exposed:
                 self._trace.emit("info", "home context: no entities exposed to Assist (nothing to ground)")
                 return self.entity_count
-            names = await self._friendly_names(exposed)  # entity_id -> friendly name
-            areas = await self._area_names()             # area_id -> name
+            names = await self._friendly_names(exposed)  # entity_id -> friendly name (existing only)
+            areas, floor_of = await self._area_names()   # area_id -> name, room name -> (level, floor)
             ent2area = await self._entity_to_area()       # entity_id -> area_id (via device)
             registry = await self._entity_registry(exposed)  # entity_id -> own area + aliases
         except Exception as err:  # noqa: BLE001
             self._trace.emit("error", f"home context refresh failed: {err}", level="error")
             return self.entity_count
+
+        # Exposure settings outlive deleted entities. Drop ids HA has no state for: a
+        # service call on one waits ~10 s for a state change that never comes.
+        ghosts = sorted(exposed - names.keys()) if names else []
+        if ghosts:
+            exposed = exposed - set(ghosts)
+            self._trace.emit("info", f"home context: skipped {len(ghosts)} exposed entities that no longer exist",
+                             data={"entity_ids": ghosts})
 
         rooms: dict[str, list[str]] = {}
         for eid in exposed:
@@ -88,12 +96,21 @@ class HomeContext:
         if not rooms:
             return self.entity_count
 
+        # Floors first, so "beneden"/"boven" map to real rooms instead of a guess.
+        floors: dict[tuple[int, str], list[str]] = {}
+        for room in rooms:
+            if room in floor_of:
+                floors.setdefault(floor_of[room], []).append(room)
+        floor_lines = [f"{name} (niveau {level}): {', '.join(sorted(rs))}" for (level, name), rs in sorted(floors.items())]
         # Stable order: named rooms first (alpha), "Zonder ruimte" last.
         lines = []
         for room in sorted(rooms, key=lambda r: (r == NO_ROOM, r.lower())):
             names = ", ".join(sorted(set(rooms[room])))
             lines.append(f"{room}: {names}")
-        self._text = "Bekende apparaten per ruimte (gebruik exact deze namen):\n" + "\n".join(lines)
+        self._text = ""
+        if floor_lines:
+            self._text = "Verdiepingen:\n" + "\n".join(floor_lines) + "\n\n"
+        self._text += "Bekende apparaten per ruimte (gebruik exact deze namen):\n" + "\n".join(lines)
         self._ts = time.time()
         self.entity_count = sum(len(v) for v in rooms.values())
         self._trace.emit("info", f"home context refreshed ({self.entity_count} entities, {len(rooms)} rooms)")
@@ -105,17 +122,22 @@ class HomeContext:
         st = getattr(self._mgr, "status", {}).get(self._server, {})
         return bool(st.get("connected"))
 
-    async def _area_names(self) -> dict[str, str]:
+    async def _area_names(self) -> tuple[dict[str, str], dict[str, tuple[int, str]]]:
+        """area_id -> name, and area name -> (floor level, floor name) for areas on a floor."""
         data = _data(await self._mgr.call_raw(self._server, "ha_list_floors_areas", {}))
         out: dict[str, str] = {}
+        floor_of: dict[str, tuple[int, str]] = {}
         # areas appear under unassigned_areas and/or floors[].areas
-        buckets = list(data.get("unassigned_areas", []))
-        for fl in data.get("floors", []):
-            buckets.extend(fl.get("areas", []))
-        for a in buckets:
+        for a in data.get("unassigned_areas", []):
             if a.get("area_id"):
                 out[a["area_id"]] = a.get("name") or a["area_id"]
-        return out
+        for fl in data.get("floors", []):
+            for a in fl.get("areas", []):
+                if a.get("area_id"):
+                    name = a.get("name") or a["area_id"]
+                    out[a["area_id"]] = name
+                    floor_of[name] = (int(fl.get("level") or 0), fl.get("name") or fl.get("floor_id", ""))
+        return out, floor_of
 
     async def _entity_to_area(self) -> dict[str, str]:
         """entity_id -> area_id, resolved through the device registry (entities
