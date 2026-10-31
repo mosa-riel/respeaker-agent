@@ -104,3 +104,15 @@ allows an array or object.
 
 Live numbers on Qwen (0.4.17, before this fix), same questions as above: eetkamer 2.9 s,
 badkamer temperature 2.5 s, keuken list 2.5 s, joke 1.2 s, time 1.2 s.
+
+## LED ring and session end (0.4.19)
+
+- The ring showed "waiting for command" (led_beam) through the whole STT + LLM wait:
+  after STT_VAD_END (ring: "thinking", breathe) `_handle_turn` sent STT_START again,
+  which the firmware maps to on_listening. Removed; the ring now breathes until TTS_START
+  (comet) — a visible "wait".
+- Follow-up windows sometimes caught a click or the tail of the reply: ~1.5 s in, VAD
+  saw "speech", STT came back empty, and the end chime was refused by the still-busy
+  device (announce `success=False`, which was not checked) — no audible end. Now less
+  than 250 ms of voiced audio before a pause is ignored as a blip, and a refused chime
+  is retried once and traced.

@@ -39,6 +39,9 @@ _LOGGER = logging.getLogger(__name__)
 _EVT = VoiceAssistantEventType
 DEVICE_MIC_RATE = 16000  # ESPHome voice assistant mic stream
 _CONTENT_TYPES = {"flac": "audio/flac", "mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg"}
+# Less voiced audio than this before a pause is a blip (a click, the tail of our own
+# reply), not speech: keep listening instead of sending it to STT.
+_MIN_VOICED_MS = 250.0
 
 
 class VoicePipeline:
@@ -71,6 +74,7 @@ class VoicePipeline:
         self._speech = False
         self._speech_byte = 0
         self._silence_ms = 0.0
+        self._voiced_ms = 0.0
         self._heard_ms = 0.0
         self._conversing = False  # in an active follow-up session
         self._chime_url: str | None = None
@@ -119,6 +123,7 @@ class VoicePipeline:
         self._speech = False
         self._speech_byte = 0
         self._silence_ms = 0.0
+        self._voiced_ms = 0.0
         self._heard_ms = 0.0
         self.last_activity = "luistert…"
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
@@ -167,9 +172,14 @@ class VoicePipeline:
                 self.last_activity = "opname…"
                 self._event(_EVT.VOICE_ASSISTANT_STT_VAD_START)
             self._silence_ms = 0.0
+            self._voiced_ms += dur_ms
         elif self._speech:
             self._silence_ms += dur_ms
 
+        if self._speech and self._silence_ms >= self._s.vad_silence_ms and self._voiced_ms < _MIN_VOICED_MS:
+            self._speech = False  # a blip, not speech: keep listening for the real thing
+            self._voiced_ms = 0.0
+            self._silence_ms = 0.0
         end_of_speech = self._speech and self._silence_ms >= self._s.vad_silence_ms
         too_long = self._heard_ms >= self._s.vad_max_ms
         no_speech = not self._speech and self._heard_ms >= self._s.vad_prespeech_ms
@@ -227,6 +237,7 @@ class VoicePipeline:
         self._finalizing = False
         self._speech = False
         self._silence_ms = 0.0
+        self._voiced_ms = 0.0
         self._heard_ms = 0.0
         self.last_activity = "klaar"
 
@@ -236,7 +247,9 @@ class VoicePipeline:
         """Run STT → agent → TTS. Returns True if it produced a spoken reply
         (in follow-up mode that also means the mic was re-opened)."""
         self.last_activity = "transcriberen…"
-        self._event(_EVT.VOICE_ASSISTANT_STT_START)
+        # No STT_START here: STT_VAD_END already moved the ring to "thinking", and the
+        # firmware maps STT_START to "waiting for command" — the ring would show that
+        # through the whole STT + LLM wait.
         text = await self._stt.transcribe(audio, in_rate=DEVICE_MIC_RATE)
         self._event(_EVT.VOICE_ASSISTANT_STT_END, {"text": text})
         if self._s.save_recordings:
@@ -344,11 +357,19 @@ class VoicePipeline:
                 self._chime_url = ""
         if not self._chime_url or self._cli is None:
             return
-        try:
-            await self._cli.send_voice_assistant_announcement_await_response(
-                media_id=self._chime_url, timeout=8.0, start_conversation=False)
-        except Exception as err:  # noqa: BLE001
-            self._trace.emit("info", f"chime failed: {str(err)[:80]}")
+        # Right after a follow-up turn the device can still be busy and refuse the
+        # announcement (success=False, no error): retry once so the session end is audible.
+        for attempt in (1, 2):
+            try:
+                res = await self._cli.send_voice_assistant_announcement_await_response(
+                    media_id=self._chime_url, timeout=8.0, start_conversation=False)
+            except Exception as err:  # noqa: BLE001
+                self._trace.emit("info", f"chime failed: {str(err)[:80]}")
+                return
+            if getattr(res, "success", True):
+                return
+            self._trace.emit("info", f"chime refused by the device (attempt {attempt})")
+            await asyncio.sleep(0.5)
 
     def _run_end(self) -> None:
         """Send RUN_END at most once per turn (the announce/follow-up path ends the
