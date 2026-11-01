@@ -262,15 +262,19 @@ class VoicePipeline:
     def _is_speech(self, data: bytes, samples: np.ndarray) -> bool:
         """The speech model on 10 ms blocks (the last verdict holds until the next block is
         complete), or the energy rule when the model is off or unusable."""
+        loud = bool(math.sqrt(float(np.mean(samples.astype(np.float32) ** 2))) > self._s.vad_threshold)
         if self._vad is None:
-            return bool(math.sqrt(float(np.mean(samples.astype(np.float32) ** 2))) > self._s.vad_threshold)
+            return loud
         self._vad_buf.extend(data)
         while len(self._vad_buf) >= _MICRO_BYTES:
             prob = self._vad.process_10ms(bytes(self._vad_buf[:_MICRO_BYTES]))
             if prob >= 0:  # negative = still filling its window
                 self._vad_speech = bool(prob >= self._s.vad_speech_prob)
             del self._vad_buf[:_MICRO_BYTES]
-        return self._vad_speech
+        # The model hears speech but not whose: a TV or someone across the room kept the turn
+        # open ~2.5 s at -36..-42 dBFS while the user talks at -20..-25. Count only speech
+        # that is also loud enough (vad_threshold).
+        return self._vad_speech and loud
 
     async def _on_stop(self, aborted: bool) -> None:
         # Device-driven stop (abort, or a firmware that DOES send end). Process

@@ -63,7 +63,6 @@ class AgentLoop:
         # straight to ha_call_service/ha_get_state without a search round. ~1k tokens —
         # far less than the tool specs, and it saves a whole LLM round per command.
         system = self._s.system_prompt
-        system += f"\n\nHet is nu {_now_nl()}."
         # Tool-usage rules appended at RUNTIME so they always apply, even if a stored
         # system_prompt (frozen in config) is out of date.
         system += (
@@ -87,6 +86,14 @@ class AgentLoop:
             system += f"\n\n=== APPARATEN ===\n{context}"
         convo: list[dict[str, Any]] = list(history or [])  # everything after system
         convo.append({"role": "user", "content": user_text})
+        # The clock rides on this turn's question, not in the system prompt: a prompt whose
+        # start changes every minute defeats the provider's prefix cache (hostyourai served
+        # 6720 of ~6760 prompt tokens from cache with a stable prefix).
+        asked = len(convo) - 1
+        stamped = {"role": "user", "content": f"{user_text}\n\n(Het is nu {_now_nl()}.)"}
+
+        def _sent() -> list[dict[str, Any]]:
+            return [{"role": "system", "content": system}] + convo[:asked] + [stamped] + convo[asked + 1:]
         specs = _with_say(self._tools.specs())
         executed: list[dict[str, Any]] = []
 
@@ -97,7 +104,7 @@ class AgentLoop:
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
             for round_i in range(1, self._s.max_tool_rounds + 1):
-                msg = await self._chat(cli, [{"role": "system", "content": system}] + convo, specs, force_tool and round_i == 1)
+                msg = await self._chat(cli, _sent(), specs, force_tool and round_i == 1)
                 tool_calls = msg.get("tool_calls") or []
                 if not tool_calls:
                     return _result((msg.get("content") or "").strip(), round_i)
@@ -131,7 +138,7 @@ class AgentLoop:
                     return _result(said, round_i)
 
             # Ran out of rounds — one closing answer without tools.
-            final = await self._chat(cli, [{"role": "system", "content": system}] + convo, None, False)
+            final = await self._chat(cli, _sent(), None, False)
             return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
 
     async def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
@@ -182,7 +189,8 @@ class AgentLoop:
                 raise
         msg = data["choices"][0]["message"]
         self._trace.emit("llm-rsp", (msg.get("content") or "").strip() or "(tool call)", direction="in",
-                         data={"finish": data["choices"][0].get("finish_reason"), "tool_calls": msg.get("tool_calls")})
+                         data={"finish": data["choices"][0].get("finish_reason"), "tool_calls": msg.get("tool_calls"),
+                               "usage": data.get("usage")})
         return msg
 
 

@@ -145,7 +145,7 @@ class Settings:
     # "energy": RMS > vad_threshold. (Silero needs AVX; the HA host's Celeron has none.)
     vad_engine: str = "micro"
     vad_speech_prob: float = 0.5  # micro: speech when its probability is at least this
-    vad_threshold: int = 500
+    vad_threshold: int = 500  # energy: speech above this RMS; micro: minimum level for speech
     vad_silence_ms: int = 800
     vad_max_ms: int = 12000
     vad_prespeech_ms: int = 7000

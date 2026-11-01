@@ -90,3 +90,12 @@ Goal set by the user: question → action as fast as possible.
   is 300 (≈0.75 s after the last sound). It ignores the synthetic fan rumble and hum too.
   The model is first loaded in a subprocess; if that crashes, the agent falls back to the
   energy rule instead of restart-looping.
+- First live test on micro (0.4.24): "zet eettafel aan" — end ~0.7 s after the last word,
+  lamp ~2.7 s, reply audible ~4.0 s. One turn stayed open ~3 s: after the command the model
+  kept hearing speech-like sound at -36..-42 dBFS (the user talks at -20..-25).
+- 0.4.25: speech = model says speech AND RMS > `vad_threshold` (600, ~-35 dBFS). Replaying
+  that turn now ends after 1.9 s of audio instead of 4.6 s; the user's own recording 15 dB
+  down (a TV across the room) no longer opens a turn.
+- The clock moved from the system prompt to this turn's question ("(Het is nu …)"), so the
+  system prompt + tools prefix is stable: hostyourai reported 6720 of ~6760 prompt tokens
+  cached with a stable prefix. `llm-rsp` trace events now carry the provider's `usage`.
