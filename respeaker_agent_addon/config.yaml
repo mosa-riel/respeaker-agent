@@ -12,7 +12,7 @@
 #   exposed on the LAN. The 172.30.32.2 source guard (RESPEAKER_INGRESS) stays as
 #   defense-in-depth.
 name: reSpeaker Agent
-version: "0.4.22"
+version: "0.4.23"
 slug: respeaker_agent
 description: Self-owned voice agent for the reSpeaker XVF3800 — wake → STT → LLM (+MCP tools) → TTS, with a live trace UI
 url: https://github.com/mosa-riel/respeaker-agent
@@ -75,6 +75,8 @@ options:
   voice_followup: true
   voice_end_chime: true
   device_volume: 1.0
+  vad_engine: silero
+  vad_speech_prob: 0.5
   vad_threshold: 500
   vad_silence_ms: 800
   vad_max_ms: 12000
@@ -115,6 +117,8 @@ schema:
   voice_followup: bool
   voice_end_chime: bool
   device_volume: float(0,1)
+  vad_engine: list(silero|energy)
+  vad_speech_prob: float(0.1,0.95)
   vad_threshold: int(0,20000)
   vad_silence_ms: int(100,5000)
   vad_max_ms: int(2000,60000)

@@ -125,6 +125,8 @@ pydantic-core==2.46.4
     # via pydantic
 pyjwt==2.13.0
     # via mcp
+pysilero-vad==3.4.0
+    # via respeaker-agent
 python-dotenv==1.2.2
     # via
     #   respeaker-agent

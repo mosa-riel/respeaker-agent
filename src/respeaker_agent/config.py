@@ -139,6 +139,10 @@ class Settings:
     # 16-bit mic PCM: speech when RMS > vad_threshold; finalize after vad_silence_ms
     # of trailing silence; hard cap at vad_max_ms; give up if no speech within
     # vad_prespeech_ms.
+    # "silero": a local speech model (pysilero-vad) says whether a 32 ms block is speech, so
+    # a fan or hum above vad_threshold no longer keeps the mic open. "energy": RMS > vad_threshold.
+    vad_engine: str = "silero"
+    vad_speech_prob: float = 0.5  # silero: speech when its probability is at least this
     vad_threshold: int = 500
     vad_silence_ms: int = 800
     vad_max_ms: int = 12000

@@ -74,3 +74,10 @@ Goal set by the user: question → action as fast as possible.
   succeeded, speaks it without a second round. A failed call still gets the second
   round. Benchmark (Qwen3-235b, 12 questions × 2): device commands 1.0–1.7 s instead of
   1.7–2.9 s, median 1.3 s instead of 2.1 s.
+- Silero speech detection (0.4.23): `vad_engine` silero (default) uses pysilero-vad
+  (MIT, ggml Silero v6.2, no onnxruntime) on 512-sample blocks; `vad_speech_prob` 0.5.
+  On saved recordings it marks the speech like the energy rule does, and on synthetic fan
+  rumble / 120 Hz hum at ~-33 dBFS (above the energy threshold) it finds no speech at all,
+  so room noise no longer keeps the mic open. ~0.2-0.3 ms CPU per 32 ms block. Silero
+  holds ~0.2 s past the last sound, so `vad_silence_ms` went from 800 to 500. Falls back
+  to the energy rule when the package is missing (`vad_engine: energy` forces it).

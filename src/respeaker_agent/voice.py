@@ -45,6 +45,18 @@ _CONTENT_TYPES = {"flac": "audio/flac", "mp3": "audio/mpeg", "wav": "audio/wav",
 _MIN_VOICED_MS = 250.0
 
 
+def _load_silero(settings: Settings, trace: TraceBus):
+    """The local Silero speech detector, or None (energy rule) when off or not installed."""
+    if settings.vad_engine != "silero":
+        return None
+    try:
+        from pysilero_vad import SileroVoiceActivityDetector
+        return SileroVoiceActivityDetector()
+    except Exception as err:  # noqa: BLE001 - fall back to the energy rule
+        trace.emit("error", f"silero VAD unavailable, using energy rule: {str(err)[:100]}", level="error")
+        return None
+
+
 class VoicePipeline:
     def __init__(
         self,
@@ -77,6 +89,9 @@ class VoicePipeline:
         self._silence_ms = 0.0
         self._voiced_ms = 0.0
         self._heard_ms = 0.0
+        self._vad = _load_silero(settings, trace)  # None = energy rule
+        self._vad_buf = bytearray()
+        self._vad_speech = False
         self._rt = None  # RealtimeTurn while stt_realtime decides the end of the turn
         self._watchdog: asyncio.Task | None = None
         self._last_audio = 0.0
@@ -131,6 +146,10 @@ class VoicePipeline:
         self._voiced_ms = 0.0
         self._heard_ms = 0.0
         self.last_activity = "luistert…"
+        if self._vad is not None:
+            self._vad.reset()
+        self._vad_buf = bytearray()
+        self._vad_speech = False
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
@@ -156,7 +175,7 @@ class VoicePipeline:
 
     async def _on_audio(self, data: bytes, data2: bytes | None) -> None:
         # This firmware streams continuously and never sends audio.end — WE decide
-        # end-of-speech (energy VAD), then finalize.
+        # end-of-speech (VAD), then finalize.
         if self._finalizing or not data:
             return
         self._last_audio = time.monotonic()
@@ -176,9 +195,8 @@ class VoicePipeline:
         self._buf.extend(data)
         if self._rt is not None:
             self._rt.send(data)
-        rms = math.sqrt(float(np.mean(samples.astype(np.float32) ** 2)))
         self._heard_ms += dur_ms
-        if rms > self._s.vad_threshold:
+        if self._is_speech(data, samples):
             if not self._speech:
                 self._speech = True
                 # byte offset where speech began (this chunk) — used to trim leading
@@ -226,6 +244,18 @@ class VoicePipeline:
     def _on_realtime_end(self, spoke: bool) -> None:
         if not self._finalizing:
             self._finalize(spoke=spoke or self._speech)
+
+    def _is_speech(self, data: bytes, samples: np.ndarray) -> bool:
+        """Silero on 512-sample blocks (the last block's verdict holds until the next is
+        complete), or the energy rule when silero is off or unavailable."""
+        if self._vad is None:
+            return bool(math.sqrt(float(np.mean(samples.astype(np.float32) ** 2))) > self._s.vad_threshold)
+        self._vad_buf.extend(data)
+        size = self._vad.chunk_bytes()
+        while len(self._vad_buf) >= size:
+            self._vad_speech = bool(self._vad(bytes(self._vad_buf[:size])) >= self._s.vad_speech_prob)
+            del self._vad_buf[:size]
+        return self._vad_speech
 
     async def _on_stop(self, aborted: bool) -> None:
         # Device-driven stop (abort, or a firmware that DOES send end). Process

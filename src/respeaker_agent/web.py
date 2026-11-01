@@ -227,13 +227,15 @@ async def put_config(payload: dict) -> JSONResponse:
     # bind like web_host). tts_provider is validated against a fixed set below.
     str_fields = {
         "device_host", "llm_base_url", "llm_model", "system_prompt",
-        "stt_base_url", "stt_model", "stt_language", "stt_realtime_model",
+        "stt_base_url", "stt_model", "stt_language", "stt_realtime_model", "vad_engine",
         "tts_provider", "tts_base_url", "tts_model", "tts_voice_id", "tts_format",
     }
     for key in str_fields & payload.keys():
         val = payload[key]
         if not isinstance(val, str):
             return JSONResponse({"ok": False, "error": f"{key} must be a string"}, status_code=422)
+        if key == "vad_engine" and val not in ("silero", "energy"):
+            return JSONResponse({"ok": False, "error": "vad_engine must be silero|energy"}, status_code=422)
         if key == "tts_provider" and val.lower() not in ("voxtral", "openai", "openai-compatible"):
             return JSONResponse({"ok": False, "error": "tts_provider must be voxtral|openai"}, status_code=422)
         setattr(settings, key, val)
@@ -259,7 +261,7 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0)}
+    float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0), "vad_speech_prob": (0.1, 0.95)}
     for key, (lo, hi) in float_fields.items():
         if key not in payload:
             continue
