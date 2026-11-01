@@ -1297,6 +1297,7 @@ dependencies = [
     { name = "soundfile" },
     { name = "soxr" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1312,6 +1313,7 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.14.0" },
     { name = "soxr", specifier = ">=0.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "websockets", specifier = ">=13" },
 ]
 
 [[package]]

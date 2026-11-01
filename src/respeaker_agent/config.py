@@ -99,6 +99,12 @@ class Settings:
     # "Keukenkopjes,Eettafel"} to bias vocab/spelling/language). Lists/dicts are
     # JSON-encoded for the multipart form. Overrides the defaults above on conflict.
     stt_extra: dict = field(default_factory=dict)
+    # Realtime turn detection (opt-in): stream the mic to a realtime STT model that
+    # decides when the user is done (it waits through a thinking pause). The final
+    # text still comes from stt_model on the buffered audio (realtime_stt.py).
+    stt_realtime: bool = False
+    stt_realtime_model: str = "voxtral-mini-transcribe-realtime-3"
+    stt_realtime_min_silence_ms: int = 500
     # TTS — pluggable endpoint. `tts_provider` selects the adapter; `tts_base_url`
     # lets you flip hosted (Voxtral) ↔ local (localhost) without code changes.
     #   provider "voxtral": Mistral speech API (base64 JSON), voice = your voice_id.

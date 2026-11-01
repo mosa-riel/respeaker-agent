@@ -76,6 +76,7 @@ class VoicePipeline:
         self._silence_ms = 0.0
         self._voiced_ms = 0.0
         self._heard_ms = 0.0
+        self._rt = None  # RealtimeTurn while stt_realtime decides the end of the turn
         self._conversing = False  # in an active follow-up session
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
@@ -129,6 +130,9 @@ class VoicePipeline:
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
+        if self._rt is not None:
+            self._rt.close()
+        self._rt = self._stt.open_turn(self._on_realtime_end)
         self._gate_ms = 0.0
         if self._s.wake_chime and self._s.audio_sink:
             # Gate the mic for the beep's lifetime (lead silence + ~1s flac + margin) so the
@@ -161,6 +165,8 @@ class VoicePipeline:
         if not self._buf:
             self._trace.emit("info", "voice: receiving audio…")
         self._buf.extend(data)
+        if self._rt is not None:
+            self._rt.send(data)
         rms = math.sqrt(float(np.mean(samples.astype(np.float32) ** 2)))
         self._heard_ms += dur_ms
         if rms > self._s.vad_threshold:
@@ -180,11 +186,19 @@ class VoicePipeline:
             self._speech = False  # a blip, not speech: keep listening for the real thing
             self._voiced_ms = 0.0
             self._silence_ms = 0.0
-        end_of_speech = self._speech and self._silence_ms >= self._s.vad_silence_ms
+        # With a live realtime stream the model decides the end of the turn (_on_realtime_end);
+        # the silence rule only applies when realtime is off or failed. The caps stay.
+        realtime = self._rt is not None and not self._rt.failed
+        end_of_speech = self._speech and self._silence_ms >= self._s.vad_silence_ms and not realtime
         too_long = self._heard_ms >= self._s.vad_max_ms
-        no_speech = not self._speech and self._heard_ms >= self._s.vad_prespeech_ms
+        no_speech = (not self._speech and not (realtime and self._rt.started)
+                     and self._heard_ms >= self._s.vad_prespeech_ms)
         if end_of_speech or too_long or no_speech:
             self._finalize(spoke=self._speech and not no_speech)
+
+    def _on_realtime_end(self, spoke: bool) -> None:
+        if not self._finalizing:
+            self._finalize(spoke=spoke or self._speech)
 
     async def _on_stop(self, aborted: bool) -> None:
         # Device-driven stop (abort, or a firmware that DOES send end). Process
@@ -199,7 +213,10 @@ class VoicePipeline:
         if self._finalizing:
             return
         self._finalizing = True
-        if self._speech:
+        if self._rt is not None:
+            self._rt.close()
+            self._rt = None
+        if self._speech or spoke:
             self._event(_EVT.VOICE_ASSISTANT_STT_VAD_END)
         # Trim leading silence to ~120ms before speech onset (16k/16-bit mono → 2 B/sample).
         start = max(0, self._speech_byte - 16000 * 2 * 120 // 1000) if self._speech else 0

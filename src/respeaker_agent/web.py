@@ -227,7 +227,7 @@ async def put_config(payload: dict) -> JSONResponse:
     # bind like web_host). tts_provider is validated against a fixed set below.
     str_fields = {
         "device_host", "llm_base_url", "llm_model", "system_prompt",
-        "stt_base_url", "stt_model", "stt_language",
+        "stt_base_url", "stt_model", "stt_language", "stt_realtime_model",
         "tts_provider", "tts_base_url", "tts_model", "tts_voice_id", "tts_format",
     }
     for key in str_fields & payload.keys():
@@ -247,6 +247,7 @@ async def put_config(payload: dict) -> JSONResponse:
         "vad_silence_ms": (100, 5000),
         "vad_max_ms": (2000, 60000),
         "vad_prespeech_ms": (1000, 30000),
+        "stt_realtime_min_silence_ms": (100, 5000),
     }
     for key, (lo, hi) in int_fields.items():
         if key not in payload:
@@ -269,7 +270,7 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    for key in {"voice_enabled", "voice_followup", "voice_end_chime", "wake_chime"} & payload.keys():
+    for key in {"voice_enabled", "voice_followup", "voice_end_chime", "wake_chime", "stt_realtime"} & payload.keys():
         setattr(settings, key, bool(payload[key]))
     if "stt_extra" in payload:
         if not isinstance(payload["stt_extra"], dict):

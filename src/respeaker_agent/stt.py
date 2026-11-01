@@ -25,6 +25,14 @@ class STTClient:
         self._key = secrets.stt_api_key
         self._trace = trace
 
+    def open_turn(self, on_end):
+        """A realtime stream that decides when the turn ends (`on_end(spoke)`), or None
+        when stt_realtime is off."""
+        if not self._s.stt_realtime:
+            return None
+        from .realtime_stt import RealtimeTurn
+        return RealtimeTurn(self._s, self._key, self._trace, on_end)
+
     async def transcribe(self, pcm16: bytes, *, in_rate: int = 16000, language: str | None = None) -> str:
         """pcm16 = raw 16-bit signed mono PCM. Returns the transcript text."""
         language = language or self._s.stt_language

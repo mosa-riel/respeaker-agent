@@ -14,3 +14,12 @@ configuration:
   voice_enabled:
     name: Enable voice
     description: Take over the reSpeaker's wake-word voice pipeline. Stop Home Assistant's own Assist for this device first.
+  stt_realtime:
+    name: Realtime turn detection
+    description: Stream the mic to a realtime STT model that decides when you are done talking (waits through thinking pauses). The final text still comes from the STT model. Off = fixed silence (vad_silence_ms).
+  stt_realtime_model:
+    name: Realtime STT model
+    description: Model for realtime turn detection (Mistral voxtral-mini-transcribe-realtime-3 supports the language and word list).
+  stt_realtime_min_silence_ms:
+    name: Realtime minimum silence (ms)
+    description: Shortest pause before the realtime model may end the turn.
