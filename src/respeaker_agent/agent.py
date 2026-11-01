@@ -70,7 +70,9 @@ class AgentLoop:
             "\n\n=== TOOLGEBRUIK ===\n"
             "- Bedienen (aan/uit, dimmen, openen/dicht): roep METEEN ha_call_service aan "
             "met de entity_id uit de apparatenlijst. Vraag de staat niet eerst op en zoek "
-            "niet eerst. Het toolresultaat is je bevestiging — niet nog eens controleren.\n"
+            "niet eerst. Vul in ha_call_service het veld 'zeg' met de korte zin die ik uitspreek "
+            "als het lukt (bv. 'De eettafel is uit.'), één zin voor de hele opdracht, bij meerdere "
+            "calls overal dezelfde. Lukt het, dan zeg ik die meteen; niet nog eens controleren.\n"
             "- Een hele ruimte (bv. 'alle lampen in de keuken'): bedien ALLE passende "
             "entity_ids van die ruimte uit de lijst.\n"
             "- ha_call_service: entity_id is precies ÉÉN string. Meerdere apparaten = "
@@ -85,7 +87,7 @@ class AgentLoop:
             system += f"\n\n=== APPARATEN ===\n{context}"
         convo: list[dict[str, Any]] = list(history or [])  # everything after system
         convo.append({"role": "user", "content": user_text})
-        specs = self._tools.specs()
+        specs = _with_say(self._tools.specs())
         executed: list[dict[str, Any]] = []
 
         def _result(text: str, rounds: int) -> AgentResult:
@@ -107,6 +109,7 @@ class AgentLoop:
                 # "all lights in the kitchen" is N calls in one round; don't run them in series.
                 calls = [(tc, tc.get("function", {}).get("name", ""), _parse_args(tc.get("function", {}).get("arguments")))
                          for tc in tool_calls]
+                says = [str(args.pop(_SAY, "") or "").strip() for _, _, args in calls]  # ours, not the server's
                 results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
                 for (tc, name, args), result in zip(calls, results):
                     executed.append({"name": name, "args": args, "result": result})
@@ -117,6 +120,15 @@ class AgentLoop:
                         # raw JSON — fewer tokens, clearer "what happened".
                         "content": render_result(result),
                     })
+
+                # A device command that came with its spoken confirmation (the 'zeg' field, or
+                # text next to the calls): when every call was a service call and all
+                # succeeded, say that now. A second LLM round only to word "it's done" cost
+                # ~0.8 s; on any failure the loop goes on as before.
+                said = next((x for x in reversed(says) if x), "") or (msg.get("content") or "").strip()
+                if said and all(name.endswith("ha_call_service") for _, name, _ in calls) \
+                        and all(_succeeded(r) for r in results):
+                    return _result(said, round_i)
 
             # Ran out of rounds — one closing answer without tools.
             final = await self._chat(cli, [{"role": "system", "content": system}] + convo, None, False)
@@ -250,6 +262,34 @@ def _retry_after(resp: httpx.Response) -> float | None:
         return min(float(raw), 10.0)  # cap so a turn can't stall forever
     except ValueError:
         return None
+
+
+_SAY = "zeg"
+
+
+def _with_say(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give the service-call tool an extra 'zeg' field: the sentence to speak when it works.
+    Models fill a schema field far more reliably than they add text next to a tool call
+    (Qwen3 never did). The agent strips it before the call reaches the MCP server."""
+    out = []
+    for spec in specs:
+        fn = spec.get("function", {})
+        if fn.get("name", "").endswith("ha_call_service"):
+            params = dict(fn.get("parameters") or {})
+            props = dict(params.get("properties") or {})
+            props[_SAY] = {"type": "string", "description": "Korte Nederlandse zin die ik uitspreek als dit lukt, bv. 'De eettafel is uit.'"}
+            params["properties"] = props
+            spec = {**spec, "function": {**fn, "parameters": params}}
+        out.append(spec)
+    return out
+
+
+def _succeeded(result: Any) -> bool:
+    """A tool result the server marked as a success (ha-mcp: structured.success)."""
+    if not isinstance(result, dict) or result.get("isError"):
+        return False
+    structured = result.get("structured")
+    return isinstance(structured, dict) and structured.get("success") is True
 
 
 def _parse_args(raw: Any) -> dict[str, Any]:

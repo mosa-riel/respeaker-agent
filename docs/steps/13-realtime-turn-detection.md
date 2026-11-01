@@ -61,3 +61,16 @@ recordings with known text and 10 silent ones: Mistral `transcribe-3` + word lis
   Mistral timed out 34 s later. Fixed with a per-turn watchdog (no audio for 1.5 s, or
   longer than vad_max_ms + 2 s → finalize) and a bound on the realtime-only wait
   (prespeech + 3 s).
+
+## Speed pass (0.4.22)
+
+Goal set by the user: question → action as fast as possible.
+
+- Realtime turn detection switched off (option kept): it cost ~2.7 s per command and its
+  text is not used.
+- One LLM round for device commands. Qwen3 never puts text next to tool calls, so
+  `ha_call_service` gets an extra `zeg` field ("sentence to speak if this works"); the
+  agent strips it before the MCP call and, when every call is a service call that
+  succeeded, speaks it without a second round. A failed call still gets the second
+  round. Benchmark (Qwen3-235b, 12 questions × 2): device commands 1.0–1.7 s instead of
+  1.7–2.9 s, median 1.3 s instead of 2.1 s.
