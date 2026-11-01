@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 import uuid
 from typing import Any
 
@@ -77,6 +78,9 @@ class VoicePipeline:
         self._voiced_ms = 0.0
         self._heard_ms = 0.0
         self._rt = None  # RealtimeTurn while stt_realtime decides the end of the turn
+        self._watchdog: asyncio.Task | None = None
+        self._last_audio = 0.0
+        self._turn_started = 0.0
         self._conversing = False  # in an active follow-up session
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
@@ -133,6 +137,10 @@ class VoicePipeline:
         if self._rt is not None:
             self._rt.close()
         self._rt = self._stt.open_turn(self._on_realtime_end)
+        self._last_audio = self._turn_started = time.monotonic()
+        if self._watchdog is not None:
+            self._watchdog.cancel()
+        self._watchdog = asyncio.create_task(self._watch_turn())
         self._gate_ms = 0.0
         if self._s.wake_chime and self._s.audio_sink:
             # Gate the mic for the beep's lifetime (lead silence + ~1s flac + margin) so the
@@ -151,6 +159,7 @@ class VoicePipeline:
         # end-of-speech (energy VAD), then finalize.
         if self._finalizing or not data:
             return
+        self._last_audio = time.monotonic()
         samples = np.frombuffer(data, dtype="<i2")
         if samples.size == 0:
             return
@@ -191,10 +200,28 @@ class VoicePipeline:
         realtime = self._rt is not None and not self._rt.failed
         end_of_speech = self._speech and self._silence_ms >= self._s.vad_silence_ms and not realtime
         too_long = self._heard_ms >= self._s.vad_max_ms
-        no_speech = (not self._speech and not (realtime and self._rt.started)
-                     and self._heard_ms >= self._s.vad_prespeech_ms)
-        if end_of_speech or too_long or no_speech:
-            self._finalize(spoke=self._speech and not no_speech)
+        # The realtime model may hear speech the energy VAD does not (quiet, or the tail of
+        # our own reply): wait for its turn.end, but not past prespeech + 3 s.
+        rt_heard = realtime and self._rt.started
+        no_speech = not self._speech and not rt_heard and self._heard_ms >= self._s.vad_prespeech_ms
+        rt_stale = not self._speech and rt_heard and self._heard_ms >= self._s.vad_prespeech_ms + 3000
+        if end_of_speech or too_long or no_speech or rt_stale:
+            self._finalize(spoke=(self._speech or rt_heard) and not no_speech)
+
+    async def _watch_turn(self) -> None:
+        """Safety net: the VAD only runs when audio arrives, so a turn whose stream stops
+        (the device ends it) would stay open — no RUN_END, no end chime. Close it after
+        1.5 s without audio, or when it outlives vad_max_ms."""
+        limit = self._s.vad_max_ms / 1000 + 2.0
+        while not self._finalizing:
+            await asyncio.sleep(0.5)
+            now = time.monotonic()
+            if self._finalizing:
+                return
+            if now - self._last_audio > 1.5 or now - self._turn_started > limit:
+                self._trace.emit("info", "voice: turn closed by watchdog (audio stopped or too long)")
+                self._finalize(spoke=self._speech)
+                return
 
     def _on_realtime_end(self, spoke: bool) -> None:
         if not self._finalizing:

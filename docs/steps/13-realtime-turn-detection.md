@@ -47,3 +47,17 @@ recordings with known text and 10 silent ones: Mistral `transcribe-3` + word lis
 9/12 perfect, 0 hallucinations, 0.32 s; hostyourai voxtral-mini-2602 37%, 5/12, 0.44 s (no
 `context_bias` support); whisper-large-v3 34%, 6/12, invented text on 8 of 10 silent clips,
 0.46 s. STT stays on Mistral `transcribe-3`.
+
+## First live use (0.4.21)
+
+- Two commands: both transcribed right; `turn.end` came ~2.7 s after the last word.
+- "Zet alle verlichting in de keuken aan … en de eettafel ook": the first sentence was
+  complete, ~2 s of silence followed, the turn ended, and the second part was spoken while
+  the agent processed (mic not listening). An earlier end (on `turn.eager_end`) would make
+  this worse, so that idea was dropped.
+- Bug: a follow-up window never closed. The realtime model reported `turn.start` (likely
+  the tail of the reply), which blocked the "no speech" exit; then the device stopped
+  streaming, and the VAD only runs on incoming audio — no RUN_END, no end chime, until
+  Mistral timed out 34 s later. Fixed with a per-turn watchdog (no audio for 1.5 s, or
+  longer than vad_max_ms + 2 s → finalize) and a bound on the realtime-only wait
+  (prespeech + 3 s).
