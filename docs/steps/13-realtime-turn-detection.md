@@ -81,3 +81,12 @@ Goal set by the user: question → action as fast as possible.
   so room noise no longer keeps the mic open. ~0.2-0.3 ms CPU per 32 ms block. Silero
   holds ~0.2 s past the last sound, so `vad_silence_ms` went from 800 to 500. Falls back
   to the energy rule when the package is missing (`vad_engine: energy` forces it).
+- Silero crashed the agent on the HA host (0.4.23): its ggml build needs AVX and the host is
+  an Intel Celeron J4025 (SSE4.2 only). The process died with no Python error and the add-on
+  restart-looped until `vad_engine` was set back to energy. Reproduced locally with
+  `qemu-x86_64 -cpu Westmere` (core dump). Replaced by pymicro-vad (Apache-2.0, the VAD of
+  HA's own voice pipeline), which runs under the same emulation (0.4.24). It detects speech
+  ~0.46 s late at both ends, so the pre-roll before the onset is 1 s and `vad_silence_ms`
+  is 300 (≈0.75 s after the last sound). It ignores the synthetic fan rumble and hum too.
+  The model is first loaded in a subprocess; if that crashes, the agent falls back to the
+  energy rule instead of restart-looping.

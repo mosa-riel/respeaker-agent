@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import subprocess
+import sys
 import time
 import uuid
 from typing import Any
@@ -45,16 +47,28 @@ _CONTENT_TYPES = {"flac": "audio/flac", "mp3": "audio/mpeg", "wav": "audio/wav",
 _MIN_VOICED_MS = 250.0
 
 
-def _load_silero(settings: Settings, trace: TraceBus):
-    """The local Silero speech detector, or None (energy rule) when off or not installed."""
-    if settings.vad_engine != "silero":
+# Bytes the speech model takes per call (10 ms of 16 kHz 16-bit mono), and how much audio to
+# keep before its detected onset: it reports speech ~0.5 s late, the energy rule at once.
+_MICRO_BYTES = 320
+_PREROLL_MS = {"energy": 120, "micro": 1000}
+
+
+def _load_vad(settings: Settings, trace: TraceBus):
+    """The local speech model, or None (energy rule) when off or unusable. A native model can
+    crash the process outright on a CPU it was not built for (Silero did on the HA host's
+    Celeron: no AVX), so it is first tried in a throwaway subprocess."""
+    if settings.vad_engine != "micro":
         return None
+    probe = "from pymicro_vad import MicroVad; MicroVad().process_10ms(bytes(320))"
     try:
-        from pysilero_vad import SileroVoiceActivityDetector
-        return SileroVoiceActivityDetector()
-    except Exception as err:  # noqa: BLE001 - fall back to the energy rule
-        trace.emit("error", f"silero VAD unavailable, using energy rule: {str(err)[:100]}", level="error")
+        ok = subprocess.run([sys.executable, "-c", probe], capture_output=True, timeout=20).returncode == 0
+    except Exception:  # noqa: BLE001
+        ok = False
+    if not ok:
+        trace.emit("error", "speech model (pymicro-vad) unusable here, using the energy rule", level="error")
         return None
+    from pymicro_vad import MicroVad
+    return MicroVad()
 
 
 class VoicePipeline:
@@ -89,7 +103,7 @@ class VoicePipeline:
         self._silence_ms = 0.0
         self._voiced_ms = 0.0
         self._heard_ms = 0.0
-        self._vad = _load_silero(settings, trace)  # None = energy rule
+        self._vad = _load_vad(settings, trace)  # None = energy rule
         self._vad_buf = bytearray()
         self._vad_speech = False
         self._rt = None  # RealtimeTurn while stt_realtime decides the end of the turn
@@ -246,15 +260,16 @@ class VoicePipeline:
             self._finalize(spoke=spoke or self._speech)
 
     def _is_speech(self, data: bytes, samples: np.ndarray) -> bool:
-        """Silero on 512-sample blocks (the last block's verdict holds until the next is
-        complete), or the energy rule when silero is off or unavailable."""
+        """The speech model on 10 ms blocks (the last verdict holds until the next block is
+        complete), or the energy rule when the model is off or unusable."""
         if self._vad is None:
             return bool(math.sqrt(float(np.mean(samples.astype(np.float32) ** 2))) > self._s.vad_threshold)
         self._vad_buf.extend(data)
-        size = self._vad.chunk_bytes()
-        while len(self._vad_buf) >= size:
-            self._vad_speech = bool(self._vad(bytes(self._vad_buf[:size])) >= self._s.vad_speech_prob)
-            del self._vad_buf[:size]
+        while len(self._vad_buf) >= _MICRO_BYTES:
+            prob = self._vad.process_10ms(bytes(self._vad_buf[:_MICRO_BYTES]))
+            if prob >= 0:  # negative = still filling its window
+                self._vad_speech = bool(prob >= self._s.vad_speech_prob)
+            del self._vad_buf[:_MICRO_BYTES]
         return self._vad_speech
 
     async def _on_stop(self, aborted: bool) -> None:
@@ -275,8 +290,10 @@ class VoicePipeline:
             self._rt = None
         if self._speech or spoke:
             self._event(_EVT.VOICE_ASSISTANT_STT_VAD_END)
-        # Trim leading silence to ~120ms before speech onset (16k/16-bit mono → 2 B/sample).
-        start = max(0, self._speech_byte - 16000 * 2 * 120 // 1000) if self._speech else 0
+        # Trim leading silence to just before the detected onset (16k/16-bit mono → 2 B/sample);
+        # the speech model detects late, so it keeps more.
+        preroll = _PREROLL_MS["micro" if self._vad is not None else "energy"]
+        start = max(0, self._speech_byte - 16000 * 2 * preroll // 1000) if self._speech else 0
         audio = bytes(self._buf[start:])
         self._buf = bytearray()
         asyncio.create_task(self._finish(audio, spoke))

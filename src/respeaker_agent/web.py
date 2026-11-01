@@ -234,8 +234,8 @@ async def put_config(payload: dict) -> JSONResponse:
         val = payload[key]
         if not isinstance(val, str):
             return JSONResponse({"ok": False, "error": f"{key} must be a string"}, status_code=422)
-        if key == "vad_engine" and val not in ("silero", "energy"):
-            return JSONResponse({"ok": False, "error": "vad_engine must be silero|energy"}, status_code=422)
+        if key == "vad_engine" and val not in ("micro", "energy"):
+            return JSONResponse({"ok": False, "error": "vad_engine must be micro|energy"}, status_code=422)
         if key == "tts_provider" and val.lower() not in ("voxtral", "openai", "openai-compatible"):
             return JSONResponse({"ok": False, "error": "tts_provider must be voxtral|openai"}, status_code=422)
         setattr(settings, key, val)

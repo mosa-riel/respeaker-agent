@@ -25,7 +25,7 @@ configuration:
     description: Shortest pause before the realtime model may end the turn.
   vad_engine:
     name: Speech detection
-    description: silero = local speech model (ignores fans and hum); energy = loudness above vad_threshold.
+    description: micro = local speech model, pymicro-vad (ignores fans and hum, ~0.5 s detection lag); energy = loudness above vad_threshold.
   vad_speech_prob:
     name: Silero speech probability
-    description: A 32 ms block counts as speech at or above this probability (silero only).
+    description: 10 ms of audio counts as speech at or above this probability (micro only).
