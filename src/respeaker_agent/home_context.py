@@ -63,7 +63,8 @@ class HomeContext:
             if not exposed:
                 self._trace.emit("info", "home context: no entities exposed to Assist (nothing to ground)")
                 return self.entity_count
-            names = await self._friendly_names(exposed)  # entity_id -> friendly name (existing only)
+            attrs = await self._attributes(exposed)  # entity_id -> state attributes (existing only)
+            names = {eid: a.get("friendly_name") or eid for eid, a in attrs.items()}
             areas, floor_of = await self._area_names()   # area_id -> name, room name -> (level, floor)
             ent2area = await self._entity_to_area()       # entity_id -> area_id (via device)
             registry = await self._entity_registry(exposed)  # entity_id -> own area + aliases
@@ -92,7 +93,8 @@ class HomeContext:
             also = f" (ook: {'; '.join(aliases)})" if aliases else ""
             # Include the entity_id so the model can call tools directly — no search
             # round, no guessing a (wrong) id.
-            rooms.setdefault(room, []).append(f"{names.get(eid, eid)} [{eid}] ({label}){also}")
+            controls = _controls(eid, attrs.get(eid, {}))
+            rooms.setdefault(room, []).append(f"{names.get(eid, eid)} [{eid}] ({label}{controls}){also}")
         if not rooms:
             return self.entity_count
 
@@ -185,18 +187,38 @@ class HomeContext:
             return {eid for eid, v in exposed.items() if (v or {}).get("conversation")}
         return set()
 
-    async def _friendly_names(self, ids: set[str]) -> dict[str, str]:
-        """entity_id -> friendly name, read live from HA state for the exposed set."""
+    async def _attributes(self, ids: set[str]) -> dict[str, dict[str, Any]]:
+        """entity_id -> state attributes (friendly name, supported features), read live
+        from HA for the exposed set; ids HA has no state for are absent."""
         if not ids:
             return {}
         data = _data(await self._mgr.call_raw(self._server, "ha_get_state", {"entity_id": sorted(ids)}))
         states = data.get("states", data) if isinstance(data, dict) else {}
-        out: dict[str, str] = {}
+        out: dict[str, dict[str, Any]] = {}
         if isinstance(states, dict):
             for eid, st in states.items():
-                attrs = (st or {}).get("attributes", {}) if isinstance(st, dict) else {}
-                out[eid] = attrs.get("friendly_name") or eid
+                out[eid] = ((st or {}).get("attributes") or {}) if isinstance(st, dict) else {}
         return out
+
+
+# HA CoverEntityFeature bits for tilting.
+_COVER_TILT = 16 | 32 | 128  # OPEN_TILT | CLOSE_TILT | SET_TILT_POSITION
+_COVER_SET_TILT = 128
+
+
+def _controls(eid: str, attrs: dict[str, Any]) -> str:
+    """How to operate the device, from HA's own feature flags, so the model reads it off
+    the controls instead of a house rule. A cover that tilts (venetian blinds): "open/dicht"
+    means tilting, "omhoog/omlaag" means position — "lamellen open" used to raise them."""
+    if not eid.startswith("cover."):
+        return ""
+    features = int(attrs.get("supported_features") or 0)
+    if not features & _COVER_TILT:
+        return ""
+    text = "; omhoog/omlaag = open_cover/close_cover, open/dicht = kantelen met open_cover_tilt/close_cover_tilt"
+    if features & _COVER_SET_TILT:
+        text += ", kanteling in % met set_cover_tilt_position"
+    return text
 
 
 def _data(res: Any) -> dict[str, Any]:

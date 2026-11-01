@@ -99,3 +99,11 @@ Goal set by the user: question → action as fast as possible.
 - The clock moved from the system prompt to this turn's question ("(Het is nu …)"), so the
   system prompt + tools prefix is stable: hostyourai reported 6720 of ~6760 prompt tokens
   cached with a stable prefix. `llm-rsp` trace events now carry the provider's `usage`.
+- Device controls in the list (0.4.26): "Zet de lamellen open" raised the venetian blind
+  (`open_cover`) instead of tilting it. The user wanted the model to read this off the
+  controls, not a house rule in the prompt. HomeContext now adds, from HA's
+  `supported_features`, how a tiltable cover is operated ("omhoog/omlaag = open_cover/
+  close_cover, open/dicht = kantelen met open_cover_tilt/close_cover_tilt, kanteling in %
+  met set_cover_tilt_position"). Dry run on Qwen: open → tilt open, omhoog → open_cover,
+  dicht → tilt closed, half open → tilt 50 %, helemaal naar beneden → close_cover; a
+  cover without tilt keeps "open" = open_cover.
