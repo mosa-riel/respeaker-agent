@@ -34,6 +34,7 @@ class DeviceLink:
         self.device_info: dict[str, Any] = {}
         self.entities: list[dict[str, str]] = []
         self._names: dict[int, str] = {}
+        self.states: dict[str, Any] = {}  # latest state per entity name (e.g. "Wake sound")
         self.last_error: str | None = None
 
     async def start(self) -> None:
@@ -107,6 +108,7 @@ class DeviceLink:
     def _on_state(self, state: Any) -> None:
         name = self._names.get(getattr(state, "key", -1), "?")
         value = getattr(state, "state", None)
+        self.states[name] = value
         self._trace.emit("device", f"{name} = {value}", direction="in")
 
     def status(self) -> dict[str, Any]:

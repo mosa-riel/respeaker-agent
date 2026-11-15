@@ -52,6 +52,11 @@ _MIN_VOICED_MS = 250.0
 _MICRO_BYTES = 320
 _PREROLL_MS = {"energy": 120, "micro": 1000}
 
+# The device's own wake sound (switch "Wake sound") is a 0.95 s chime, and the firmware starts
+# streaming the mic 300 ms into it. With a speaker attached the rest of it opens every
+# recording louder than the speech; ignore the mic that long.
+_DEVICE_CHIME_GATE_MS = 600.0
+
 
 def _load_vad(settings: Settings, trace: TraceBus):
     """The local speech model, or None (energy rule) when off or unusable. A native model can
@@ -82,6 +87,7 @@ class VoicePipeline:
         convos: ConversationStore,
         home: HomeContext,
         audio_srv: TTSAudioServer,
+        device_states: dict[str, Any] | None = None,
     ) -> None:
         self._s = settings
         self._trace = trace
@@ -91,6 +97,7 @@ class VoicePipeline:
         self._convos = convos
         self._home = home  # cached device list for the prompt
         self._audio_srv = audio_srv
+        self._device_states = device_states if device_states is not None else {}  # DeviceLink.states
         self._cli: APIClient | None = None
         self._unsub: Any = None
         self._buf = bytearray()
@@ -111,6 +118,9 @@ class VoicePipeline:
         self._last_audio = 0.0
         self._turn_started = 0.0
         self._conversing = False  # in an active follow-up session
+        # The next start is the device re-opening the mic after our reply (start_conversation).
+        # It carries the wake word phrase too, but the firmware plays no wake sound for it.
+        self._followup_pending = False
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
         self._gate_ms = 0.0  # ignore mic for this many ms (wake beep bleed) — see _on_audio
@@ -166,6 +176,7 @@ class VoicePipeline:
         self._vad_speech = False
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
+        followup, self._followup_pending = self._followup_pending, False
         self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
         if self._rt is not None:
             self._rt.close()
@@ -180,6 +191,8 @@ class VoicePipeline:
             # speaker bleed doesn't trip the VAD. Speak after the beep.
             self._gate_ms = self._s.bt_lead_silence_ms + 1300
             asyncio.create_task(self._play_wake_chime())  # cue on the BT/host speaker; don't block the mic
+        elif not followup and self._device_states.get("Wake sound") is True:
+            self._gate_ms = _DEVICE_CHIME_GATE_MS
         self._event(_EVT.VOICE_ASSISTANT_RUN_START)
         # Enter the listening phase NOW (drives the device's listening LEDs) — the
         # transcript comes later in STT_END. (Sending STT_START after speech ended
@@ -201,7 +214,8 @@ class VoicePipeline:
             # The wake beep plays on the BT speaker, which sits near the mic; the XVF3800
             # AEC can't cancel a sink it doesn't drive, so the mic hears the beep. Ignore
             # the mic for the beep's duration so the VAD doesn't mistake it for speech and
-            # finalize before the user talks.
+            # finalize before the user talks. The device's own wake sound gets through the
+            # AEC too once a speaker is attached (_DEVICE_CHIME_GATE_MS).
             self._gate_ms -= dur_ms
             return
         if not self._buf:
@@ -395,12 +409,15 @@ class VoicePipeline:
             # start_conversation re-opens the mic — follow-up without a new wake word.
             self._run_end()
             assert self._cli is not None
+            # Set before sending: the device may start the follow-up before the await returns.
+            self._followup_pending = True
             try:
                 await self._cli.send_voice_assistant_announcement_await_response(
                     media_id=url, timeout=min((secs or 6) + 25, 120.0),
                     text=result.text, start_conversation=True)
                 self._conversing = True  # mic re-opened → in a session
             except Exception as err:  # noqa: BLE001
+                self._followup_pending = False
                 self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
         else:
             self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})

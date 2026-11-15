@@ -67,7 +67,8 @@ async def lifespan(app: FastAPI):
     app.state.home_ctx = home_ctx
     audio_srv = TTSAudioServer(settings.tts_audio_port)
     app.state.audio_srv = audio_srv
-    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx, audio_srv)
+    voice = VoicePipeline(settings, trace, app.state.stt, app.state.agent, app.state.tts, app.state.convos, home_ctx, audio_srv,
+                          device_states=link.states)
     app.state.voice = voice
     app.state.keepalive = None
     if settings.audio_sink:

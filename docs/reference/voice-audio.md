@@ -74,9 +74,23 @@ transcript is garbage/wrong-language → it's the STT model/language forcing, no
 `tts_voice_id`, `tts_format`, `tts_pcm_rate`, `tts_out_rate`. Keys
 (`STT_API_KEY`/`TTS_API_KEY`) are `.env`-only and fall back to `LLM_API_KEY`.
 
-Current voice: `tts_voice_id = bf93b5a8-5759-4c01-8d58-204022a76bea` (user's own
-Studio-recorded voice, "Aapje"). The TTS stage settings modal shows a **voice dropdown**
+Current voice (since 2026-11-15): Mistral's Dutch preset "Lotte", `tts_voice_id =
+voice_3145`, which needs `tts_model = voxtral-mini-tts-3-0` (400 on `voxtral-mini-tts-2603`).
+`tts_model` is an add-on option and is rewritten on every boot, so it must be set there too.
+Earlier voices were custom (per-account) voices, e.g. `bf93b5a8-…` ("Aapje", the user's own
+Studio recording). The TTS stage settings modal shows a **voice dropdown**
 populated from `GET /api/voices` (engine `/audio/voices` with the TTS key; key never
-returned). Custom voices are **per-account** — a wrong/stale `api_key` makes the engine
-404 `invalid_voice` (looks like "TTS broken"); `voice_id` is required and there are no
-Dutch *preset* voices, so Dutch needs a custom-cloned voice on that key.
+returned); it shows only the first page (10 voices), so Lotte is not in it. Custom voices are
+**per-account** — a wrong/stale `api_key` makes the engine 404 `invalid_voice` (looks like
+"TTS broken"). Voxtral TTS 3 FLAC is 24 kHz mono 24-bit without a sample count, so
+`flac_duration_seconds` returns None; the device plays it fine.
+
+## Wake sound and the mic gate
+
+The device's own wake sound (switch "Wake sound") is a 0.95 s chime; the firmware starts the
+mic stream 300 ms into it. With a speaker attached the rest of it lands in the recording,
+louder than the speech, and garbles STT. So after a wake word, with "Wake sound" on (read from
+`DeviceLink.states`), the agent ignores the first 600 ms of mic audio (`_DEVICE_CHIME_GATE_MS`).
+Follow-ups (`start_conversation` after a reply) carry the wake word phrase too but get no
+chime; `_followup_pending`, set before the announcement, keeps them ungated. With
+`wake_chime` + `audio_sink` the agent plays its own chime and gates for that instead.
