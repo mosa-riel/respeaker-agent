@@ -102,7 +102,11 @@ class AgentLoop:
             "- Gaat een stap even duren (zoeken, route, weer, een kaart), zet dan een korte, natuurlijke zin "
             "als tekst naast je toolaanroep, zoals je in een gesprek zou zeggen ('Even kijken hoe het waait "
             "richting Sittard.'); die spreek ik meteen uit.\n"
-            "- Plaatsen: 'thuis', 'hier' of geen startpunt is altijd het huis (het adres van Home Assistant)."
+            "- Plaatsen: 'thuis', 'hier' of geen startpunt is altijd het huis (het adres van Home Assistant).\n"
+            "- De vorige vragen en antwoorden (tot drie, van het afgelopen half uur) staan hierboven. Verwijst "
+            "de gebruiker ergens naar ('dat', 'daar', 'laat het zien', 'en morgen?'), kijk daar dan eerst.\n"
+            "- Zoek op internet hooguit twee keer per vraag; antwoord daarna met wat je gevonden hebt en zeg "
+            "het eerlijk als het niet zeker is."
         )
         if context:
             system += f"\n\n=== APPARATEN ===\n{context}"
@@ -313,6 +317,16 @@ class ConversationStore:
     def clear(self, conv_id: str) -> None:
         self._store.pop(conv_id, None)
 
+    def keep_recent(self, conv_id: str, turns: int = 3) -> None:
+        """End of a voice session: keep only the last `turns` questions with their answers, so
+        a new question shortly after can still refer back ("laat dat zien", "en morgen?")."""
+        ent = self._store.get(conv_id)
+        if not ent:
+            return
+        msgs = ent["messages"]
+        starts = [i for i, m in enumerate(msgs) if m.get("role") == "user"]
+        ent["messages"] = msgs[starts[-turns]:] if len(starts) > turns else msgs
+
 
 def _compact_history(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Persist only the conversational gist — user turns + the model's final spoken
@@ -324,6 +338,8 @@ def _compact_history(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for m in msgs:
         role = m.get("role")
         if role == "user":
+            if m.get("content") == _NUDGE:  # our own push, not something the user said
+                continue
             out.append({"role": "user", "content": m.get("content") or ""})
         elif role == "assistant" and not m.get("tool_calls") and (m.get("content") or "").strip():
             out.append({"role": "assistant", "content": m["content"]})

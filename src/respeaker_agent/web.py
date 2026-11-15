@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     app.state.link = link
     app.state.tools = tools
     app.state.agent = AgentLoop(settings, secrets, trace, tools)
-    app.state.convos = ConversationStore()
+    app.state.convos = ConversationStore(ttl=1800.0)  # 30 min: "en morgen?" a while later still works
     app.state.stt = STTClient(settings, secrets, trace)
     app.state.tts = make_tts(settings, secrets, trace)
     mcp = McpManager(settings, trace, tools)

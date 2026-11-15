@@ -333,7 +333,7 @@ class VoicePipeline:
         for t in self._turn_speech:
             t.cancel()
         self._turn_speech = []
-        self._convos.clear(self._conv_id)  # what was asked is dropped with it
+        self._convos.keep_recent(self._conv_id)  # the dropped question was never stored
 
     async def _on_stop(self, aborted: bool) -> None:
         # Device-driven stop (abort, or a firmware that DOES send end). Process
@@ -400,10 +400,10 @@ class VoicePipeline:
             session_end = self._s.voice_followup and outcome in ("none", "done")
             self._run_end()
             if session_end:
-                # The firmware reuses one conversation id ("voice") for every wake, so
-                # without this a new question minutes later still carries the previous
-                # session as history. Mic closed = conversation over.
-                self._convos.clear(self._conv_id)
+                # The firmware reuses one conversation id ("voice") for every wake. Keep the
+                # last three questions (30 min TTL) so a new question can refer back to them;
+                # drop the rest so prompts stay short.
+                self._convos.keep_recent(self._conv_id)
                 self._followups = 0
                 if self._s.voice_end_chime:
                     await self._play_chime()

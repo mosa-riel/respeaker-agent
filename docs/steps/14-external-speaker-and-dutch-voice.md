@@ -160,3 +160,15 @@ and in the add-on options).
 - Home: the context starts with where the house is (zone.home; town via PDOK reverse
   geocoding, coordinates; not the street address), and the rules say 'thuis', 'hier' or no
   starting point means the house. mcp-geo treats those words and an empty place the same.
+
+## 0.4.35: remember the last three questions, search less
+
+- The user wants the agent to look back two or three questions when it is unclear what they
+  mean. A voice session used to clear its history at the end. Now it keeps the last three
+  questions with their answers (`ConversationStore.keep_recent`, TTL 30 min instead of 10),
+  also when a question is interrupted; the agent's own nudge message is not stored. The rules
+  tell the model to look there when the user refers back ('dat', 'daar', 'en morgen?').
+- A library-hours question took ten search calls (26 s). Rule: search the web at most twice
+  per question, then answer with what was found and say when it is uncertain.
+- New MCP servers the same day: geo (mcp-geo) and staan (mcp-staan, staan.ai search, market
+  en-gb because staan.ai has no Dutch market); websearch disabled in the agent.
