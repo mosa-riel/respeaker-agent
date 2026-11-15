@@ -173,3 +173,13 @@ never spoken.
   Voxtral the agent now asks for raw float32 PCM and encodes the processed FLAC itself
   (`audio.pcm_to_loud_flac`); other engines' FLAC still goes through `louder_flac`. On a sample
   reply: +13.7 dB average level at `tts_gain_db` 8.
+
+## Even loudness over time (0.4.42)
+
+- Long replies faded: Voxtral's voice on a 32 s poem went from about -13 to -30 dBFS, and one
+  gain for the whole clip kept the end quiet. `audio.level` (option `tts_level`, on) now moves
+  the gain per ~0.4 s window towards -18 dBFS (at most +15/-6 dB), gives silence the typical
+  gain instead of boosting it, and smooths the gain over 0.25 s. The peak normalization uses the
+  99.7th percentile, so a few lifted transients no longer hold the reply down; the soft limiter
+  catches them. On the poem at `tts_gain_db` 8: about -7 dBFS at the start, -10 at the end
+  (before: -9 and -29).

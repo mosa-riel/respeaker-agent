@@ -74,7 +74,7 @@ def main() -> None:
         "tts_provider", "tts_base_url", "tts_model", "tts_format",
         "tts_pcm_rate", "tts_out_rate", "tts_voice_format", "tts_audio_port",
         "tts_audio_host", "voice_enabled", "voice_followup", "voice_end_chime",
-        "device_volume", "tts_gain_db", "tts_highpass_hz", "tts_presence_db", "vad_engine", "vad_speech_prob", "vad_threshold", "vad_silence_ms", "vad_max_ms",
+        "device_volume", "tts_gain_db", "tts_highpass_hz", "tts_presence_db", "tts_level", "vad_engine", "vad_speech_prob", "vad_threshold", "vad_silence_ms", "vad_max_ms",
         "vad_prespeech_ms", "followup_listen_ms", "followup_max", "audio_sink", "bt_lead_silence_ms", "bluetooth_control",
         "save_recordings",
     )

@@ -149,7 +149,7 @@ STT: `stt_base_url`, `stt_model`, `stt_language`, `stt_prompt`, `stt_normalize`,
 `stt_gain_max`, `stt_extra`, `stt_realtime*`. TTS: `tts_provider`, `tts_base_url`,
 `tts_model`, `tts_voice_id`, `tts_format`, `tts_pcm_rate`, `tts_out_rate`,
 `tts_voice_format`, `tts_audio_port`, `tts_audio_host`. Voice: `voice_enabled`,
-`voice_followup`, `voice_end_chime`, `device_volume`, `tts_gain_db`, `tts_highpass_hz`, `tts_presence_db`, `vad_*`, `followup_*`, `audio_sink`,
+`voice_followup`, `voice_end_chime`, `device_volume`, `tts_gain_db`, `tts_highpass_hz`, `tts_presence_db`, `tts_level`, `vad_*`, `followup_*`, `audio_sink`,
 `bt_lead_silence_ms`, `save_recordings`. Keys (`STT_API_KEY` / `TTS_API_KEY`) are env-only and
 fall back to `LLM_API_KEY`.
 
@@ -162,5 +162,5 @@ to -1 dBFS and then raised by `tts_gain_db` dB (0–12, default 4) through a sof
 speaker is still too quiet; above ~8 dB the limiter starts to work audibly. Before that, the
 speech is shaped for a small speaker (`audio.speaker_eq`, zero-phase): a 12 dB/octave high-pass at
 `tts_highpass_hz` (default 250 Hz) and a broad boost of `tts_presence_db` (default 4 dB) around
-3 kHz; 0 switches either off. The end chime is
+3 kHz; 0 switches either off. `tts_level` (on) evens out loudness over time first: TTS voices fade towards the end of long replies, so the gain follows ~0.4 s windows towards -18 dBFS (silence excluded, gain smoothed); the normalization then uses the 99.7th percentile and the limiter catches the rest. The end chime is
 generated near full scale (0.85).

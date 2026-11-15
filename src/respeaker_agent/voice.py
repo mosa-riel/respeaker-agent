@@ -550,7 +550,7 @@ class VoicePipeline:
         event" otherwise) and decodes by type — its pipeline is FLAC and it rejects WAV. Ask
         the engine for the configured format; the device resamples to its 48 kHz pipeline."""
         fmt = self._s.tts_voice_format
-        shape = (self._s.tts_gain_db, self._s.tts_highpass_hz, self._s.tts_presence_db)
+        shape = (self._s.tts_gain_db, self._s.tts_highpass_hz, self._s.tts_presence_db, self._s.tts_level)
         data = None
         if fmt == "flac" and self._s.tts_provider == "voxtral":
             # Voxtral's FLAC is streamed (no sample count) and libsndfile can't read it back; ask

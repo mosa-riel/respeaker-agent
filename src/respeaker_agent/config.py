@@ -147,6 +147,8 @@ class Settings:
     # presence boost around 3 kHz, in dB. 0 = off.
     tts_highpass_hz: int = 250
     tts_presence_db: float = 4.0
+    # Even out loudness over time (audio.level): TTS voices fade towards the end of long replies.
+    tts_level: bool = True
     # Server-side end-of-speech detection (this firmware streams continuously and
     # expects the server to decide when the user stopped). Energy-based VAD on the
     # 16-bit mic PCM: speech when RMS > vad_threshold; finalize after vad_silence_ms
