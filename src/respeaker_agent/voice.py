@@ -57,6 +57,19 @@ _PREROLL_MS = {"energy": 120, "micro": 1000}
 # recording louder than the speech; ignore the mic that long.
 _DEVICE_CHIME_GATE_MS = 600.0
 
+# The model decides per reply whether the mic re-opens: it ends a reply with _FOLLOW when it
+# expects the user to answer right away (a reply that ends in a question counts too). In a
+# follow-up (no wake word) it answers _IGNORE when the speech was not meant for it, e.g. people
+# talking in the room; the session then ends quietly instead of looping.
+_FOLLOW, _IGNORE = "[VERVOLG]", "[NEGEER]"
+_NOTE = ("(Gesproken via de reSpeaker. Verwacht je dat de gebruiker direct nog iets zegt, omdat "
+         "je zelf iets vraagt of omdat het een open vraag of uitleg is waar een vervolgvraag "
+         "logisch is, eindig je antwoord dan met [VERVOLG]. Na een uitgevoerde opdracht (lamp, "
+         "rolluik, scherm, lijstje) niet.)")
+_NOTE_FOLLOWUP = _NOTE + (" (Dit is een vervolg zonder wekwoord. Is de tekst niet aan jou "
+                          "gericht, zoals een gesprek tussen anderen, losse woorden of geen vraag "
+                          "of opdracht, antwoord dan alleen [NEGEER].)")
+
 
 def _load_vad(settings: Settings, trace: TraceBus):
     """The local speech model, or None (energy rule) when off or unusable. A native model can
@@ -121,6 +134,9 @@ class VoicePipeline:
         # The next start is the device re-opening the mic after our reply (start_conversation).
         # It carries the wake word phrase too, but the firmware plays no wake sound for it.
         self._followup_pending = False
+        self._in_followup = False  # this turn is a follow-up (no wake word)
+        self._followups = 0  # follow-ups so far in this session (capped by followup_max)
+        self._listen_ms = float(settings.vad_prespeech_ms)  # give up when no speech by then
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
         self._gate_ms = 0.0  # ignore mic for this many ms (wake beep bleed) — see _on_audio
@@ -177,7 +193,13 @@ class VoicePipeline:
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         followup, self._followup_pending = self._followup_pending, False
-        self._trace.emit("wake", wake_word_phrase or "(vervolg)", data={"conversation_id": self._conv_id, "flags": flags})
+        self._in_followup = followup
+        if not followup:
+            self._followups = 0
+        # A follow-up only waits briefly for speech (sound extends it, see _on_audio).
+        self._listen_ms = float(self._s.followup_listen_ms if followup else self._s.vad_prespeech_ms)
+        self._trace.emit("wake", "(vervolg)" if followup else (wake_word_phrase or "(start)"),
+                         data={"conversation_id": self._conv_id, "flags": flags})
         if self._rt is not None:
             self._rt.close()
         self._rt = self._stt.open_turn(self._on_realtime_end)
@@ -237,6 +259,11 @@ class VoicePipeline:
         elif self._speech:
             self._silence_ms += dur_ms
 
+        if (self._listen_ms < self._s.vad_prespeech_ms
+                and math.sqrt(float(np.mean(samples.astype(np.float32) ** 2))) > self._s.vad_threshold):
+            # Sound in the short follow-up window ("eh…"): give the user the full time.
+            self._listen_ms = float(self._s.vad_prespeech_ms)
+            self._trace.emit("info", "voice: geluid in het vervolg, langer luisteren")
         if self._speech and self._silence_ms >= self._s.vad_silence_ms and self._voiced_ms < _MIN_VOICED_MS:
             self._speech = False  # a blip, not speech: keep listening for the real thing
             self._voiced_ms = 0.0
@@ -249,8 +276,8 @@ class VoicePipeline:
         # The realtime model may hear speech the energy VAD does not (quiet, or the tail of
         # our own reply): wait for its turn.end, but not past prespeech + 3 s.
         rt_heard = realtime and self._rt.started
-        no_speech = not self._speech and not rt_heard and self._heard_ms >= self._s.vad_prespeech_ms
-        rt_stale = not self._speech and rt_heard and self._heard_ms >= self._s.vad_prespeech_ms + 3000
+        no_speech = not self._speech and not rt_heard and self._heard_ms >= self._listen_ms
+        rt_stale = not self._speech and rt_heard and self._heard_ms >= self._listen_ms + 3000
         if end_of_speech or too_long or no_speech or rt_stale:
             self._finalize(spoke=(self._speech or rt_heard) and not no_speech)
 
@@ -326,25 +353,26 @@ class VoicePipeline:
         asyncio.create_task(self._finish(audio, spoke))
 
     async def _finish(self, audio: bytes, spoke: bool) -> None:
-        replied = False
+        outcome = "none"  # none | done (replied, session over) | followup | local
         try:
             if spoke and audio:
-                replied = await self._handle_turn(audio)
+                outcome = await self._handle_turn(audio)
             else:
                 self._trace.emit("info", "voice: no speech captured")
         except Exception as err:  # noqa: BLE001 - never leave the device hanging
             self._trace.emit("error", f"voice turn failed: {err}", level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
         finally:
-            # Ended without a reply (no speech / nothing to say) → session closes.
-            # Chime so you hear the mic shut. (Only meaningful with follow-up on.)
-            session_end = self._s.voice_followup and not replied
+            # No follow-up (nothing heard, nothing to say, or a reply that needs no answer)
+            # → session closes. Chime so you hear the mic shut. (Only with follow-up on.)
+            session_end = self._s.voice_followup and outcome in ("none", "done")
             self._run_end()
             if session_end:
                 # The firmware reuses one conversation id ("voice") for every wake, so
                 # without this a new question minutes later still carries the previous
                 # session as history. Mic closed = conversation over.
                 self._convos.clear(self._conv_id)
+                self._followups = 0
                 if self._s.voice_end_chime:
                     await self._play_chime()
             self._conversing = False
@@ -361,9 +389,9 @@ class VoicePipeline:
 
     # ── the turn ────────────────────────────────────────────────────────────────
 
-    async def _handle_turn(self, audio: bytes) -> bool:
-        """Run STT → agent → TTS. Returns True if it produced a spoken reply
-        (in follow-up mode that also means the mic was re-opened)."""
+    async def _handle_turn(self, audio: bytes) -> str:
+        """Run STT → agent → TTS. Returns "none" (nothing spoken), "done" (spoken, session
+        over), "followup" (spoken and the mic re-opened) or "local" (spoken on audio_sink)."""
         self.last_activity = "transcriberen…"
         # No STT_START here: STT_VAD_END already moved the ring to "thinking", and the
         # firmware maps STT_START to "waiting for command" — the ring would show that
@@ -375,59 +403,76 @@ class VoicePipeline:
             recordings.save(audio, DEVICE_MIC_RATE, text)  # keep what STT heard, to play back
         if not text:
             self.last_activity = "niets verstaan"
-            return False
+            return "none"
 
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
-        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get())
+        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get(),
+                                       note=_NOTE_FOLLOWUP if self._in_followup else _NOTE)
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
-        if not result.text:
-            return False
+        reply = result.text or ""
+        if _IGNORE in reply.upper():
+            self._trace.emit("info", "voice: niet voor mij bedoeld, sessie stopt")
+            return "none"
+        follow = _FOLLOW in reply.upper() or reply.rstrip().endswith("?")
+        reply = reply.replace(_FOLLOW, "").replace(_FOLLOW.lower(), "").strip()
+        if not reply:
+            return "none"
+        if follow and self._followups >= self._s.followup_max:
+            follow = False
+            self._trace.emit("info", f"voice: max {self._s.followup_max} vervolgbeurten, sessie stopt")
 
         self.last_activity = "praten…"
         assert self._cli is not None
-        self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": result.text})
+        self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": reply})
         if self._s.audio_sink:
             # Local-sink mode: stream TTS straight to a host PulseAudio sink (e.g. a
             # paired Bluetooth speaker) instead of the device. We AWAIT real playback,
             # so no duration guessing. Follow-up (mic re-open) rides the device announce
             # path, which we skip here — so this turn ends and the user wakes again.
             # (synth_stream already emits the "tts" trace — don't double-log here.)
-            await play_pcm_stream(self._tts.synth_stream(result.text), self._s.audio_sink, self._s.tts_out_rate, self._trace, lead_ms=self._s.bt_lead_silence_ms)
+            await play_pcm_stream(self._tts.synth_stream(reply), self._s.audio_sink, self._s.tts_out_rate, self._trace, lead_ms=self._s.bt_lead_silence_ms)
             self._event(_EVT.VOICE_ASSISTANT_TTS_END)
             self._run_end()
             self.last_activity = "klaar"
-            return True
+            return "local"
         # This firmware plays TTS via its media_player fetching a URL ("No url in
         # TTS_END event" otherwise) and decodes by type — its pipeline is FLAC and it
         # rejects WAV. Ask the engine for the configured format, publish it on the LAN
         # audio server, hand the device the URL; it resamples to its 48 kHz pipeline.
         fmt = self._s.tts_voice_format
-        data = await self._tts.synth_encoded(result.text, fmt)
+        data = await self._tts.synth_encoded(reply, fmt)
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)
         secs = flac_duration_seconds(data) if fmt == "flac" else None
         # Show the spoken reply (relevant); keep the url/size in the payload.
-        self._trace.emit("tts", result.text, direction="out",
-                         data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None, "url": url})
+        self._trace.emit("tts", reply, direction="out",
+                         data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None,
+                               "url": url, "vervolg": follow})
         if self._s.voice_followup:
             # Announce path: end this run, then play the reply via the announce API
-            # which AWAITS real playback end (no tail-clipping / duration guessing) and
-            # start_conversation re-opens the mic — follow-up without a new wake word.
+            # which AWAITS real playback end (no tail-clipping / duration guessing).
+            # With start_conversation the device re-opens the mic afterwards — a follow-up
+            # without a new wake word; without it the session ends (end chime in _finish).
             self._run_end()
             assert self._cli is not None
             # Set before sending: the device may start the follow-up before the await returns.
-            self._followup_pending = True
+            self._followup_pending = follow
             try:
                 await self._cli.send_voice_assistant_announcement_await_response(
                     media_id=url, timeout=min((secs or 6) + 25, 120.0),
-                    text=result.text, start_conversation=True)
-                self._conversing = True  # mic re-opened → in a session
+                    text=reply, start_conversation=follow)
             except Exception as err:  # noqa: BLE001
                 self._followup_pending = False
                 self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
+                return "done"
+            if follow:
+                self._conversing = True  # mic re-opened → in a session
+                self._followups += 1
+            self.last_activity = "klaar"
+            return "followup" if follow else "done"
         else:
             self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
             # Hold the turn until playback finishes (device plays the URL async). It
@@ -436,7 +481,7 @@ class VoicePipeline:
             if secs:
                 await asyncio.sleep(min(secs + 1.6, 40.0))
         self.last_activity = "klaar"
-        return True
+        return "done"
 
     async def _play_wake_chime(self) -> None:
         """Play the bundled wake 'beep' (the upstream wake_word_triggered flac) on the

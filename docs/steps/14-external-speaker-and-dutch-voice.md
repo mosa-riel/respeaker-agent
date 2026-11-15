@@ -61,3 +61,22 @@ and in the add-on options).
   task is now a reconnect loop, and a call on a lost session reconnects and retries once (see
   `reference/deployment.md`). Tested locally: list_pages, restart the MCP server, list_pages
   again → "session lost; reconnecting", connected, the second call succeeds.
+
+## 0.4.29: the model decides whether to keep listening
+
+- The user found that Nabu listened too long after every reply, and once kept re-opening the
+  mic while people were talking in the room (each follow-up transcribed the conversation,
+  got a reply and opened the next follow-up).
+- Now the model decides per reply: the voice loop sends a note with each turn (agent.run
+  `note`, not stored in the history) asking it to end the reply with `[VERVOLG]` when it
+  expects an answer right away (it asks something, or an open question or explanation). A
+  reply that ends in `?` counts too. Device commands (one round with `zeg`) never follow up:
+  the reply is announced with `start_conversation=False` and the end chime plays right after.
+- A follow-up listens `followup_listen_ms` (2000) for speech; any sound above `vad_threshold`
+  in that window (an "eh") extends it to `vad_prespeech_ms`. No sound: the session ends.
+- In a follow-up the note also says: not meant for you (people talking, loose words, no
+  question or command) → answer only `[NEGEER]`; the session then ends quietly (end chime).
+- At most `followup_max` (3) follow-ups per wake word.
+- Checked with stubs: command → no follow-up + chime; open answer with [VERVOLG] and a
+  question back → follow-up; [NEGEER] in a follow-up → nothing spoken + chime; cap → chime;
+  quiet follow-up closes after 2 s, a loud blip extends to 7 s.

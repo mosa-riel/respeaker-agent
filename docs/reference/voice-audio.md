@@ -94,3 +94,14 @@ louder than the speech, and garbles STT. So after a wake word, with "Wake sound"
 Follow-ups (`start_conversation` after a reply) carry the wake word phrase too but get no
 chime; `_followup_pending`, set before the announcement, keeps them ungated. With
 `wake_chime` + `audio_sink` the agent plays its own chime and gates for that instead.
+
+## Follow-up (mic re-open after a reply)
+
+With `voice_followup` on, the model decides per reply whether to listen on: `[VERVOLG]` at the
+end of its reply (or a reply ending in `?`) re-opens the mic via the announce API
+(`start_conversation=True`); otherwise the reply plays and the end chime follows. Markers are
+stripped before TTS. A follow-up waits `followup_listen_ms` (2000) for speech, extended to
+`vad_prespeech_ms` by any sound above `vad_threshold`; in a follow-up the model answers
+`[NEGEER]` when the speech was not meant for it, which ends the session quietly. At most
+`followup_max` (3) follow-ups per wake word. The rules ride along as a per-turn note
+(`_NOTE` / `_NOTE_FOLLOWUP` in voice.py), not in the stored system prompt.

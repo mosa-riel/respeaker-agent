@@ -128,6 +128,12 @@ class Settings:
     # (~vad_prespeech_ms) — an end chime then signals it's closed.
     voice_followup: bool = True
     voice_end_chime: bool = True  # play a short chime when a follow-up session ends
+    # The model decides per reply whether to listen on ([VERVOLG] in its reply, or a reply that
+    # ends in a question); device commands end the session right after the reply. A follow-up
+    # listens followup_listen_ms for speech; any sound above vad_threshold extends that to
+    # vad_prespeech_ms. At most followup_max follow-ups per wake word.
+    followup_listen_ms: int = 2000
+    followup_max: int = 3
     # Play a short "ready" beep on the host/Bluetooth sink (audio_sink) at wake — for
     # devices with no usable on-board speaker. UI-toggleable (not an add-on scalar), so it
     # applies live. Needs audio_sink set. The device's own wake sound is a separate HA

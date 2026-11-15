@@ -250,6 +250,8 @@ async def put_config(payload: dict) -> JSONResponse:
         "vad_silence_ms": (100, 5000),
         "vad_max_ms": (2000, 60000),
         "vad_prespeech_ms": (1000, 30000),
+        "followup_listen_ms": (500, 30000),
+        "followup_max": (0, 20),
         "stt_realtime_min_silence_ms": (100, 5000),
     }
     for key, (lo, hi) in int_fields.items():

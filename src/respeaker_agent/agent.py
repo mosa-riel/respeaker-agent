@@ -56,6 +56,7 @@ class AgentLoop:
         history: list[dict[str, Any]] | None = None,
         force_tool: bool = False,
         context: str | None = None,
+        note: str | None = None,
     ) -> AgentResult:
         # `history` = prior turns (user/assistant/tool messages, NO system) so
         # follow-ups like "ja" / "doe maar" keep context. `context` = the cached,
@@ -90,7 +91,9 @@ class AgentLoop:
         # start changes every minute defeats the provider's prefix cache (hostyourai served
         # 6720 of ~6760 prompt tokens from cache with a stable prefix).
         asked = len(convo) - 1
-        stamped = {"role": "user", "content": f"{user_text}\n\n(Het is nu {_now_nl()}.)"}
+        # `note` (e.g. the voice loop's follow-up rules) rides along the same way: sent with
+        # this turn only, not kept in the history.
+        stamped = {"role": "user", "content": f"{user_text}\n\n(Het is nu {_now_nl()}.)" + (f"\n{note}" if note else "")}
 
         def _sent() -> list[dict[str, Any]]:
             return [{"role": "system", "content": system}] + convo[:asked] + [stamped] + convo[asked + 1:]
