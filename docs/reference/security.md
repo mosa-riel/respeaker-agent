@@ -123,6 +123,15 @@ gate:
   Bluetooth-pairing only (no data exfil, no code exec), MAC-gated, and off by default.
   Keep it off unless you want voice/UI speaker switching.
 
+### Turn log (0.4.37)
+
+- **`/data/turns.jsonl` + `GET /api/turns`** keep what was said in the house (transcripts,
+  spoken answers, tool arguments and results, shortened) across restarts, for evaluation.
+  Same content and same ingress-only gate as `/api/trace`; read-only, no parameters reach a
+  path (fixed file, `limit` capped). Not written to logs. Secrets never enter the trace, so
+  they do not enter the turn log. The file lives in the add-on's `/data`, so it is in HA
+  backups of the add-on; ~2000 turns kept.
+
 ## Hardening gates
 
 - **Bind off `127.0.0.1`:** ✅ satisfied in the add-on via **ingress + 172.30.32.2-only

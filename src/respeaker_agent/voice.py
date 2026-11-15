@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import subprocess
 import sys
 import time
@@ -37,6 +38,8 @@ from .stt import STTClient
 from .trace import TraceBus
 from .tts import TTSClient
 from .tts_server import TTSAudioServer
+from .turns import TurnLog
+from . import __version__
 
 _LOGGER = logging.getLogger(__name__)
 _EVT = VoiceAssistantEventType
@@ -112,6 +115,8 @@ class VoicePipeline:
         self._convos = convos
         self._home = home  # cached device list for the prompt
         self._audio_srv = audio_srv
+        self._turns = TurnLog(trace, os.getenv("RESPEAKER_VERSION", __version__))
+        self._turn_wall = 0.0  # wall-clock time of this turn's wake, for the turn log
         self._device_states = device_states if device_states is not None else {}  # DeviceLink.states
         self._cli: APIClient | None = None
         self._unsub: Any = None
@@ -212,6 +217,7 @@ class VoicePipeline:
             self._rt.close()
         self._rt = self._stt.open_turn(self._on_realtime_end)
         self._last_audio = self._turn_started = time.monotonic()
+        self._turn_wall = time.time()
         if self._watchdog is not None:
             self._watchdog.cancel()
         self._watchdog = asyncio.create_task(self._watch_turn())
@@ -375,6 +381,7 @@ class VoicePipeline:
 
     async def _finish(self, audio: bytes, spoke: bool) -> None:
         outcome = "none"  # none | done (replied, session over) | followup | local | cancelled
+        started = self._turn_wall  # a follow-up may start before this turn has ended
         try:
             if spoke and audio:
                 outcome = await self._handle_turn(audio)
@@ -393,6 +400,11 @@ class VoicePipeline:
                 except Exception:  # noqa: BLE001
                     pass
         finally:
+            if started:
+                try:
+                    self._turns.record(started, outcome)
+                except Exception as err:  # noqa: BLE001 - the log must never break a turn
+                    self._trace.emit("info", f"turn log failed: {err!r}"[:200], level="warn")
             if outcome == "cancelled":
                 return
             # No follow-up (nothing heard, nothing to say, or a reply that needs no answer)

@@ -339,6 +339,14 @@ async def list_voices() -> JSONResponse:
     return JSONResponse({"voices": voices})
 
 
+@app.get("/api/turns")
+async def list_turns(limit: int = 50, since: float = 0.0) -> JSONResponse:
+    """The turn log (newest last): what was heard, tools, what was spoken, outcome; for
+    evaluating interactions. `since` = epoch seconds."""
+    from . import turns
+    return JSONResponse({"turns": turns.latest(limit, since)})
+
+
 @app.get("/api/recordings")
 async def list_recordings() -> JSONResponse:
     from . import recordings

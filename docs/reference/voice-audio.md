@@ -68,6 +68,13 @@ to STT** — as `<config-dir>/recordings/<ts>.wav` + a `.txt` transcript, last 2
 quiet / cut short → it's capture/VAD (`vad_*`, gain); if it sounds clear but the
 transcript is garbage/wrong-language → it's the STT model/language forcing, not the audio.
 
+**Turn log.** Every voice turn is appended to `<config-dir>/turns.jsonl` (`turns.py`, ~2000
+turns kept): heard text, tool calls (arguments and result shortened), spoken lines with their
+time since the wake, the model's final text, errors, outcome and duration. It is built from the
+turn's trace events when the turn ends, so it survives restarts where the trace does not.
+`GET /api/turns?limit=50&since=<epoch>` returns it; `scripts/turn-report.py` (stdin or a file)
+lists the turns with flags for a closer look.
+
 ## Config keys (all non-secret, UI-editable)
 
 `stt_base_url`, `stt_model`, `tts_provider`, `tts_base_url`, `tts_model`,

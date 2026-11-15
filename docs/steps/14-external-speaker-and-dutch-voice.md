@@ -183,3 +183,23 @@ and in the add-on options).
 - The user asked for general improvements rather than fixes tuned to the test questions;
   mcp-geo 0.1.1 therefore uses OpenStreetMap Nominatim (importance ranking, POIs) with
   alternatives for the model instead of hand-tuned place ranking.
+
+## 0.4.37: stop after the answer, say when a place is not found, turn log
+
+- A route question went on after the spoken answer and the card: the round that showed the
+  card also held a place lookup, and the early end only applied when every call in the round
+  was a screen tool. Now a turn ends once the answer has been spoken and a card in that round
+  rendered, whatever else ran next to it (the model's later "Even kijken waar ... ligt" was a
+  second answer nobody heard).
+- A misheard street ("Kapucijnersstraat") was searched four or five times in other spellings,
+  then the centre of Maastricht was shown as if it were the street. Rule: when a tool finds
+  nothing or only a similar name, say so (also on the card), ask if needed, and do not repeat
+  the same search in other spellings. mcp-geo 0.1.2 falls back to a fuzzy PDOK search and
+  marks such results as similar names.
+- The user wants to evaluate all interactions. Every voice turn is now written to
+  `/data/turns.jsonl` (`turns.py`, built from the trace events of the turn): what was heard,
+  each tool call with shortened arguments and result, what was spoken and when, the model's
+  final text, errors, outcome, duration and the add-on version (`BUILD_VERSION` from the
+  Supervisor). `GET /api/turns?limit=&since=` serves it; `scripts/turn-report.py` prints the
+  turns with automatic flags (slow first word, long turn, repeated or failed lookups, unspoken
+  model text, a promised card that never came, a lookup without a card, errors).

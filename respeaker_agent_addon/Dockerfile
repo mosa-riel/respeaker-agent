@@ -1,7 +1,10 @@
 # The build context is this subfolder, which can't reach the app at the repo root, so
 # the image clones the repo itself. Public GitHub repo → no auth needed.
 FROM python:3.13-slim
-ENV PYTHONUNBUFFERED=1 \
+# The Supervisor passes the add-on version; the turn log records it per turn.
+ARG BUILD_VERSION=dev
+ENV RESPEAKER_VERSION=${BUILD_VERSION} \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     RESPEAKER_CONFIG=/data/config.json \
     RESPEAKER_INGRESS=1

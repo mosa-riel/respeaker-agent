@@ -104,6 +104,9 @@ class AgentLoop:
             "als tekst naast je toolaanroep, zoals je in een gesprek zou zeggen ('Even kijken hoe het waait "
             "richting Sittard.'); die spreek ik meteen uit.\n"
             "- Plaatsen: 'thuis', 'hier' of geen startpunt is altijd het huis (het adres van Home Assistant).\n"
+            "- Vindt een tool iets niet, of alleen iets gelijkends, zeg dat eerlijk (ook op de kaart) en doe niet "
+            "alsof je het gevraagde hebt; vraag zo nodig wat er bedoeld wordt. Herhaal dezelfde zoekvraag niet "
+            "in andere schrijfwijzen.\n"
             "- De vorige vragen en antwoorden (tot drie, van het afgelopen half uur) staan hierboven. Verwijst "
             "de gebruiker ergens naar ('dat', 'daar', 'laat het zien', 'en morgen?'), kijk daar dan eerst.\n"
             "- Zoek op internet hooguit twee keer per vraag; antwoord daarna met wat je gevonden hebt en zeg "
@@ -217,9 +220,13 @@ class AgentLoop:
                             and all(_succeeded(r) for r in results):
                         return _result(said, round_i)
                     # The card is on screen and the answer was given with it: done, no closing round.
+                    # Once the answer has been spoken, other calls next to the card (a last lookup)
+                    # don't keep the turn going: that only led to a second, contradicting answer.
                     answer = spoken or said
-                    if answer and all(_is_screen(n) and not n.endswith("screen_components") for _, n, _ in calls) \
-                            and all(_screen_ok(r) for r in results):
+                    renders = [r for (_, n, _), r in zip(calls, results)
+                               if _is_screen(n) and not n.endswith("screen_components")]
+                    if answer and renders and all(_screen_ok(r) for r in renders) \
+                            and (spoken or all(_is_screen(n) for _, n, _ in calls)):
                         return _result(answer, round_i, early=bool(spoken) or answer in progress["said"])
 
                 # Ran out of rounds — one closing answer without tools.
