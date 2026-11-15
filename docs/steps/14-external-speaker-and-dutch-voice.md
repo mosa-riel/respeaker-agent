@@ -150,3 +150,13 @@ and in the add-on options).
   information, when a card is likely; never promise to show something without doing it.
 - Checked with a stub model: search → promise → components → card: answer spoken at round 2,
   four LLM calls, no closing round.
+
+## 0.4.34: natural progress lines, where home is
+
+- The user found "Ik ben er nog mee bezig" / "Ik zoek het op internet op" too canned. Progress
+  lines now vary and fit the step ("Ik zoek de route naar Sittard op.", "Even kijken wat het
+  weer morgen doet.", "Even kijken waar Jupille ligt.", "Momentje."), and the rules ask the
+  model to put its own short, natural sentence next to slow tool calls (spoken at once).
+- Home: the context starts with where the house is (zone.home; town via PDOK reverse
+  geocoding, coordinates; not the street address), and the rules say 'thuis', 'hier' or no
+  starting point means the house. mcp-geo treats those words and an empty place the same.

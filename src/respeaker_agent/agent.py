@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -97,7 +98,11 @@ class AgentLoop:
             "- Werk parallel: weet je al dat er een kaart komt, roep screen_components dan in de EERSTE "
             "ronde aan, tegelijk met de tools die de informatie ophalen.\n"
             "- Beloof nooit iets zonder het te doen: zeg je dat je iets laat zien, roep dan in dezelfde "
-            "beurt de schermtools aan."
+            "beurt de schermtools aan.\n"
+            "- Gaat een stap even duren (zoeken, route, weer, een kaart), zet dan een korte, natuurlijke zin "
+            "als tekst naast je toolaanroep, zoals je in een gesprek zou zeggen ('Even kijken hoe het waait "
+            "richting Sittard.'); die spreek ik meteen uit.\n"
+            "- Plaatsen: 'thuis', 'hier' of geen startpunt is altijd het huis (het adres van Home Assistant)."
         )
         if context:
             system += f"\n\n=== APPARATEN ===\n{context}"
@@ -120,7 +125,7 @@ class AgentLoop:
         nudged = False  # pushed the model once to do the screen work it promised
         # Progress for voice: the model's own text next to tool calls is spoken at once; when it
         # has been quiet for _QUIET_S, a short line says what is going on (at most _PROGRESS_MAX).
-        progress = {"last": time.monotonic(), "count": 0, "doing": "Ik denk even na.", "said": set()}
+        progress = {"last": time.monotonic(), "count": 0, "doing": random.choice(_THINKING), "said": set()}
 
         def _progress(text: str) -> None:
             if on_progress is None or spoken or progress["count"] >= _PROGRESS_MAX or text in progress["said"]:
@@ -147,7 +152,7 @@ class AgentLoop:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
                 for round_i in range(1, self._s.max_tool_rounds + 1):
-                    progress["doing"] = "Ik denk even na." if round_i == 1 else "Ik ben er nog mee bezig."
+                    progress["doing"] = random.choice(_THINKING if round_i == 1 else _STILL)
                     msg = await self._chat(cli, _sent(), specs, force_tool and round_i == 1)
                     tool_calls = msg.get("tool_calls") or []
                     if not tool_calls:
@@ -377,19 +382,36 @@ _QUIET_S = 7.0  # speak a progress line after this long without speech
 _PROGRESS_MAX = 3  # progress lines per turn
 
 
+_THINKING = ["Momentje.", "Even denken.", "Eén momentje.", "Even kijken."]
+_STILL = ["Nog heel even.", "Bijna.", "Nog even geduld.", "Ik ben er bijna."]
+
+
 def _doing(calls: list[tuple[Any, str, dict]]) -> str:
-    """A short Dutch line for what the next tool round does (spoken when it is quiet long)."""
-    names = [n.split("__")[-1] for _, n, _ in calls]
-    args = [a for _, _, a in calls]
-    if any(n in ("screen_components", "show_card", "show_html", "show_dashboard") for n in names):
-        return "Ik maak een kaart voor het scherm."
-    if any(a.get("domain") == "weather" or "weather" in str(a.get("entity_id", "")) for a in args):
-        return "Ik haal de weersverwachting op."
-    if any(n in ("web_search", "fetch_page") for n in names):
-        return "Ik zoek het even op internet op."
-    if any(n.startswith("ha_") for n in names):
-        return "Ik kijk even in Home Assistant."
-    return "Ik ben er nog mee bezig."
+    """A short, natural Dutch line for what the next tool round does, spoken when it has been
+    quiet for a while; varied so it does not sound canned."""
+    pick = random.choice
+    for _, n, a in calls:
+        tool = n.split("__")[-1]
+        place = str(a.get("plaats") or "").strip()
+        day = str(a.get("dag") or "").strip()
+        where = "" if place.lower() in ("", "thuis", "hier") else f" in {place}"
+        when = f" {day}" if day and day != "vandaag" else ""
+        if tool == "route":
+            dest = a.get("naar", "")
+            return pick([f"Ik zoek de route naar {dest} op.", f"Even de route naar {dest} bekijken."])
+        if tool == "weer" or a.get("domain") == "weather" or "weather." in str(a.get("entity_id", "")):
+            return pick([f"Even kijken wat het weer{where}{when} doet.", f"Ik kijk even naar het weer{where}{when}."])
+        if tool == "plaats_zoeken":
+            return f"Even kijken waar {a.get('naam', 'dat')} ligt."
+        if tool in ("screen_components", "show_card", "show_html", "show_dashboard"):
+            return pick(["Ik zet het op het scherm.", "Ik maak er een kaartje van."])
+        if tool == "web_search":
+            return pick(["Even opzoeken.", "Ik kijk even op internet.", "Even zoeken."])
+        if tool == "fetch_page":
+            return pick(["Ik lees het even na.", "Even verder lezen."])
+        if tool.startswith("ha_"):
+            return pick(["Even kijken in huis.", "Ik kijk even hoe het ervoor staat."])
+    return pick(_STILL)
 
 
 _SCREEN_TOOLS = ("screen_components", "show_card", "show_page", "show_dashboard", "show_html", "show_text",

@@ -47,6 +47,7 @@ class HomeContext:
         self._trace = trace
         self._server = server
         self._text: str = ""
+        self._home_town: str | None = None  # looked up once
         self._ts: float = 0.0
         self.entity_count: int = 0
 
@@ -110,8 +111,10 @@ class HomeContext:
             names = ", ".join(sorted(set(rooms[room])))
             lines.append(f"{room}: {names}")
         self._text = ""
+        if (home := await self._home_line()):
+            self._text = home + "\n\n"
         if floor_lines:
-            self._text = "Verdiepingen:\n" + "\n".join(floor_lines) + "\n\n"
+            self._text += "Verdiepingen:\n" + "\n".join(floor_lines) + "\n\n"
         self._text += "Bekende apparaten per ruimte (gebruik exact deze namen):\n" + "\n".join(lines)
         self._ts = time.time()
         self.entity_count = sum(len(v) for v in rooms.values())
@@ -119,6 +122,33 @@ class HomeContext:
         return self.entity_count
 
     # ── data sources ────────────────────────────────────────────────────────
+
+    async def _home_line(self) -> str:
+        """Where the house is (HA's zone.home): town from PDOK reverse geocoding and the
+        coordinates, so 'thuis', 'hier' or a missing starting point mean this place. Only the
+        town goes into the prompt, not the street address."""
+        try:
+            data = _data(await self._mgr.call_raw(self._server, "ha_get_state", {"entity_id": "zone.home"}))
+            attrs = data.get("attributes") or {}
+            lat, lon = float(attrs["latitude"]), float(attrs["longitude"])
+        except Exception:  # noqa: BLE001 - best effort
+            return ""
+        if self._home_town is None:
+            self._home_town = ""
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=8) as cli:
+                    r = await cli.get("https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse",
+                                      params={"lat": lat, "lon": lon, "rows": 1, "type": "woonplaats"})
+                    docs = r.json().get("response", {}).get("docs", [])
+                    if docs:
+                        self._home_town = docs[0].get("weergavenaam", "")
+            except Exception:  # noqa: BLE001
+                pass
+        town = f"{self._home_town}, " if self._home_town else ""
+        return (f"Thuis (het huis, adres van Home Assistant): {town}lat {lat:.4f}, lon {lon:.4f}. "
+                "'Thuis', 'hier' of geen startpunt betekent deze plek.")
 
     def _connected(self) -> bool:
         st = getattr(self._mgr, "status", {}).get(self._server, {})
