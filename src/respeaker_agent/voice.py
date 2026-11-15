@@ -303,6 +303,15 @@ class VoicePipeline:
         if self._finalizing:
             return
         self._finalizing = True
+        # Stop this turn's watchdog: a quick no-speech _finish resets _finalizing before the
+        # watchdog's next check, so it kept running and finalized the turn a second time
+        # (two end chimes). Not when the watchdog itself is finalizing.
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:  # called outside the loop (realtime callback)
+            current = None
+        if self._watchdog is not None and self._watchdog is not current:
+            self._watchdog.cancel()
         if self._rt is not None:
             self._rt.close()
             self._rt = None

@@ -49,3 +49,15 @@ How-to log (append-only). 2026-11-15.
 
 The user turned `stt_realtime` back on, then found it added nothing; it is off again (live
 and in the add-on options).
+
+## 0.4.28: double end chime, MCP reconnects
+
+- Double end chime: after a turn without speech the turn was finalized twice ("no speech
+  captured", then the watchdog). The quick no-speech `_finish` reset `_finalizing` within one
+  0.5 s watchdog sleep, so the watchdog kept running and fired once the device stopped
+  streaming. `_finalize` now cancels the turn's watchdog (unless the watchdog is the caller).
+- MCP: after the MCP Screen add-on was updated (twice that afternoon) every screen command
+  failed with "Session not found" and red LEDs until the agent was restarted. The connection
+  task is now a reconnect loop, and a call on a lost session reconnects and retries once (see
+  `reference/deployment.md`). Tested locally: list_pages, restart the MCP server, list_pages
+  again → "session lost; reconnecting", connected, the second call succeeds.

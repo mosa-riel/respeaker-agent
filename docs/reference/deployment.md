@@ -60,6 +60,16 @@ installed MCP add-ons by slug suffix (`mcp_funbox`, `mcp_websearch`, `mcp_screen
 `http://<real-hostname>:<port>/mcp`. Best-effort; a no-op when run outside HA. Net:
 **install an MCP add-on → the agent finds it; no url editing.**
 
+## MCP reconnects (0.4.28)
+
+Each MCP server's connection is a reconnect loop (`McpManager._serve`). A server that is not
+up yet at boot is retried (5 s, doubling to 60 s), and a server that restarts later (an add-on
+update) is reconnected: a tool call that fails with "Session not found" (or a broken
+transport) asks for a reconnect and retries once on the new session. Tools are re-registered
+on every connect, so new tools from an updated MCP add-on appear without restarting the
+agent (removed ones linger until a restart). Before 0.4.28 every call failed until the agent
+was restarted.
+
 ## Config & secrets (agent add-on)
 
 - `addon-run.py` is the entrypoint. It maps the **`api_key`** option →

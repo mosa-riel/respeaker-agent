@@ -18,6 +18,11 @@ them piecemeal raises "exit cancel scope in a different task". Tool calls are is
 other tasks (the agent loop); that's fine — only the context manager enter/exit is
 task-bound, not the session method calls. Adding/removing a server via the API rewrites
 config and requires a restart to connect.
+
+Reconnects: that task loops. A server that is down at startup (boot order) or restarts later
+(an app update: its calls then fail with "Session not found") is reconnected, and its tools
+re-registered, so new tools after an update appear too. A tool call that hits a lost session
+asks for a reconnect and retries once on the new session.
 """
 
 from __future__ import annotations
@@ -44,6 +49,7 @@ class McpManager:
         self._trace = trace
         self._registry = registry
         self._sessions: dict[str, ClientSession] = {}
+        self._reconnect: dict[str, asyncio.Event] = {}  # set → drop the session and reconnect
         self._tasks: list[asyncio.Task] = []
         self._shutdown = asyncio.Event()
         # server name -> {"connected": bool, "tools": [names], "error": str|None}
@@ -76,48 +82,84 @@ class McpManager:
         self._sessions.clear()
 
     async def _serve(self, srv: McpServer, ready: asyncio.Event) -> None:
-        """Own one server's connection for the process lifetime. The full context-manager
-        chain is entered and exited in THIS task (anyio requirement for streamable-HTTP)."""
-        try:
-            if srv.transport == "http":
-                from mcp.client.streamable_http import streamable_http_client
+        """Own one server's connection for the process lifetime, reconnecting when it fails
+        or is lost. The full context-manager chain is entered and exited in THIS task (anyio
+        requirement for streamable-HTTP)."""
+        delay = 5.0
+        while not self._shutdown.is_set():
+            lost = self._reconnect[srv.name] = asyncio.Event()
+            try:
+                if srv.transport == "http":
+                    from mcp.client.streamable_http import streamable_http_client
 
-                async with streamable_http_client(srv.url) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await self._register(srv, session)
-                        ready.set()
-                        await self._shutdown.wait()
-            else:
-                params = StdioServerParameters(
-                    command=srv.command,
-                    args=list(srv.args),
-                    # Inherit the agent env (so .env secrets like HOMEASSISTANT_TOKEN reach
-                    # the subprocess), with the server's non-secret env layered on top.
-                    env={**os.environ, **srv.env},
-                )
-                async with stdio_client(params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await self._register(srv, session)
-                        ready.set()
-                        await self._shutdown.wait()
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001 - one bad server mustn't kill the rest
-            msg = _safe(err)
-            self.status[srv.name] = {"connected": False, "tools": [], "error": msg}
-            self._trace.emit("error", f"MCP '{srv.name}' connect failed: {msg}", level="error")
-            _LOGGER.exception("MCP connect failed: %s", srv.name)
-        finally:
-            ready.set()  # never leave start() waiting, even on early failure
+                    async with streamable_http_client(srv.url) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            await self._register(srv, session)
+                            ready.set()
+                            delay = 5.0
+                            await _first(self._shutdown.wait(), lost.wait())
+                else:
+                    params = StdioServerParameters(
+                        command=srv.command,
+                        args=list(srv.args),
+                        # Inherit the agent env (so .env secrets like HOMEASSISTANT_TOKEN reach
+                        # the subprocess), with the server's non-secret env layered on top.
+                        env={**os.environ, **srv.env},
+                    )
+                    async with stdio_client(params) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            await self._register(srv, session)
+                            ready.set()
+                            delay = 5.0
+                            await _first(self._shutdown.wait(), lost.wait())
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - one bad server mustn't kill the rest
+                msg = _safe(err)
+                self.status[srv.name] = {"connected": False, "tools": [], "error": msg}
+                self._trace.emit("error", f"MCP '{srv.name}' connect failed: {msg}; retry in {delay:.0f} s", level="error")
+                _LOGGER.warning("MCP connect failed: %s: %s", srv.name, msg)
+            finally:
+                ready.set()  # never leave start() waiting, even on early failure
+                self._sessions.pop(srv.name, None)
+            if self._shutdown.is_set():
+                return
+            if lost.is_set():
+                self._trace.emit("info", f"MCP '{srv.name}' session lost; reconnecting")
+                continue  # reconnect right away
+            await _first(self._shutdown.wait(), asyncio.sleep(delay))
+            delay = min(delay * 2, 60.0)
+
+    async def _session_for(self, server: str, stale: ClientSession | None, timeout: float = 15.0) -> ClientSession:
+        """The server's current session, waiting (up to `timeout`) for one other than `stale`."""
+        loop = asyncio.get_running_loop()
+        end = loop.time() + timeout
+        while True:
+            session = self._sessions.get(server)
+            if session is not None and session is not stale:
+                return session
+            if loop.time() >= end:
+                raise RuntimeError(f"MCP server not connected: {server}")
+            await asyncio.sleep(0.25)
 
     async def call_raw(self, server: str, tool: str, args: dict[str, Any]) -> Any:
         """Call a tool on a connected server directly, regardless of whether it's
         exposed to the agent (used by HomeContext to read the entity list even when
         that tool isn't in the curated set)."""
-        session = self._sessions.get(server)
-        if session is None:
-            raise RuntimeError(f"MCP server not connected: {server}")
-        return _result_to_json(await session.call_tool(tool, args))
+        return await self._call(server, tool, args)
+
+    async def _call(self, server: str, tool: str, args: dict[str, Any]) -> Any:
+        session = await self._session_for(server, None, timeout=5.0)
+        try:
+            return _result_to_json(await session.call_tool(tool, args))
+        except Exception as err:  # noqa: BLE001
+            if not _session_lost(err):
+                raise
+            # The server restarted under us: reconnect, then try once more.
+            if (ev := self._reconnect.get(server)) is not None:
+                ev.set()
+            session = await self._session_for(server, session)
+            return _result_to_json(await session.call_tool(tool, args))
 
     async def _register(self, srv: McpServer, session: ClientSession) -> None:
         """Initialize the session, fetch its tools, and register the enabled ones."""
@@ -133,7 +175,7 @@ class McpManager:
                 continue
             qualified = f"{_slug(srv.name)}__{t.name}"
             overrides = (srv.tool_arg_overrides or {}).get(t.name, {})
-            self._registry.add(self._make_tool(session, qualified, t.name, t.description or "", t.input_schema or {}, overrides))
+            self._registry.add(self._make_tool(srv.name, qualified, t.name, t.description or "", t.input_schema or {}, overrides))
             exposed.append(qualified)
         self._sessions[srv.name] = session
         self.status[srv.name] = {
@@ -144,7 +186,7 @@ class McpManager:
         extra = f", {off_n} disabled" if off_n else ""
         self._trace.emit("info", f"MCP '{srv.name}' connected ({len(exposed)} tools{extra})", data={"tools": exposed})
 
-    def _make_tool(self, session: ClientSession, qualified: str, original: str, desc: str, schema: dict, overrides: dict | None = None) -> Tool:
+    def _make_tool(self, server: str, qualified: str, original: str, desc: str, schema: dict, overrides: dict | None = None) -> Tool:
         # Normalise to a JSON-schema object so providers accept it.
         params = schema if isinstance(schema, dict) and schema.get("type") == "object" else {
             "type": "object", "properties": {}, "required": [],
@@ -153,8 +195,7 @@ class McpManager:
 
         async def handler(args: dict[str, Any]) -> Any:
             # Forced args win over whatever the model passed (e.g. include_hidden=false).
-            result = await session.call_tool(original, {**_decode_json_args(args, params), **forced})
-            return _result_to_json(result)
+            return await self._call(server, original, {**_decode_json_args(args, params), **forced})
 
         return Tool(name=qualified, description=desc, parameters=params, handler=handler)
 
@@ -327,3 +368,23 @@ def _safe(err: BaseException) -> str:
         err = err.exceptions[0]
     msg = str(err) or err.__class__.__name__
     return msg.splitlines()[0][:200]
+
+
+async def _first(*aws) -> None:
+    """Wait until the first of these awaitables finishes; cancel the rest."""
+    tasks = [asyncio.ensure_future(a) for a in aws]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+
+
+def _session_lost(err: BaseException) -> bool:
+    """A call failed because the session is gone (server restarted), not because of the tool."""
+    import anyio
+    import httpx
+
+    if isinstance(err, (anyio.ClosedResourceError, anyio.BrokenResourceError, httpx.TransportError)):
+        return True
+    return "session not found" in str(err).lower() or "session terminated" in str(err).lower()
