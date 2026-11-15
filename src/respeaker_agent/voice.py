@@ -523,6 +523,14 @@ class VoicePipeline:
         expected = len(line) * _SPEECH_S_PER_CHAR
         if played and expected > 1.5 and took < 0.4 * expected:
             self._interrupt("onderbroken tijdens het spreken")
+            self._event(_EVT.VOICE_ASSISTANT_RUN_END)  # no "thinking" LEDs for a dropped question
+            return
+        # The firmware ends every announcement with on_end → idle LEDs, though the agent is still
+        # working. Once that has run, show "thinking" again (on_stt_vad_end sets that phase),
+        # unless the next announcement is already playing.
+        await asyncio.sleep(0.8)
+        if self._turn_task is not None and not self._turn_task.done() and not self._say_lock.locked():
+            self._event(_EVT.VOICE_ASSISTANT_STT_VAD_END)
 
     async def _publish_tts(self, reply: str, follow: bool) -> tuple[str, float | None]:
         """Synthesize `reply` and publish it on the LAN audio server → (url, seconds).

@@ -125,3 +125,16 @@ and in the add-on options).
 - Checked with stubs: progress order then answer; budget message + chime; new wake word
   cancels without chime; cut-off progress line cancels; quiet watcher speaks during a slow
   LLM round and names the tool round.
+
+## 0.4.32: thinking LEDs after a progress line
+
+- The firmware ends every announcement with on_end → idle LEDs, so after the first progress
+  line the ring stopped breathing while the agent still worked. After a progress line (0.8 s,
+  once on_end has run) the agent sends STT_VAD_END again, which sets the thinking phase,
+  unless the turn is over or the next announcement is already playing. A question dropped
+  by cutting off a progress line gets RUN_END instead.
+- LLM comparison the same day (agent's real prompt and tools, from the HA host): first
+  reply with a tool call: Mistral Medium 0.6 s, Qwen3-235B at hostyourai 0.7-2.0 s, Mistral
+  Small 0.5-1.7 s but it read the lamp state instead of switching it, Mistral Large 1.8-2.6 s.
+  A show_card answer: Mistral Medium 2.4-2.6 s (350-420 tokens), Qwen 13-18 s (2900-3200
+  tokens, far more verbose), Mistral Large 11-28 s.
