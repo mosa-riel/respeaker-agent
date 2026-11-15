@@ -172,3 +172,14 @@ and in the add-on options).
   per question, then answer with what was found and say when it is uncertain.
 - New MCP servers the same day: geo (mcp-geo) and staan (mcp-staan, staan.ai search, market
   en-gb because staan.ai has no Dutch market); websearch disabled in the agent.
+
+## 0.4.36: a card with every lookup
+
+- The user wants a card with answers ("Misschien moet er altijd een kaartje komen"). When the
+  model looked something up (geo, staan, websearch) and answered without a screen tool, the
+  answer is spoken and the model is pushed once to make a card (the same nudge as for empty
+  promises), so the card is built while the answer plays. The rules say: a card with every
+  information question; not for device commands and small talk.
+- The user asked for general improvements rather than fixes tuned to the test questions;
+  mcp-geo 0.1.1 therefore uses OpenStreetMap Nominatim (importance ranking, POIs) with
+  alternatives for the model instead of hand-tuned place ranking.

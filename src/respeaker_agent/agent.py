@@ -86,11 +86,12 @@ class AgentLoop:
             "- Staat iets niet in de lijst: ha_search_entities met area_filter=<ruimte> "
             "en/of domain_filter (geen losse woorden als 'lamp' in query) en negeer "
             "treffers buiten de gevraagde ruimte. Vind je het niet, zeg dat dan.\n"
-            "- Het e-paper scherm in de huiskamer is een verlengstuk van je antwoord. Wordt een "
-            "antwoord duidelijker met beeld (getallen, lijstjes, stappen, vergelijkingen, verloop in "
-            "de tijd, plaatsen, routes, richtingen), maak dan een kaart: eerst screen_components "
-            "(de bouwdoos), dan show_card. Vraagt de gebruiker iets op het scherm te zetten of te "
-            "tekenen, doe dat altijd. Bij gewone opdrachten (lampen, rolluiken) geen kaart.\n"
+            "- Het e-paper scherm in de huiskamer is een verlengstuk van je antwoord. Bij elke "
+            "informatievraag (weer, route, plaats, feiten, uitleg, getallen, lijstjes, vergelijkingen) "
+            "maak je een kaart: eerst screen_components (de bouwdoos), dan show_card; bij een route of "
+            "plaats met een kaartje (map). Vraagt de gebruiker iets op het scherm te zetten of te "
+            "tekenen, doe dat altijd. Bij opdrachten aan apparaten (lampen, rolluiken) en korte "
+            "praatjes geen kaart.\n"
             "- Bij de EERSTE schermtool vul je 'zeg' met je gesproken antwoord: eerst kort het "
             "antwoord zelf, zo dat het zonder scherm te begrijpen is, dan dat je het op het scherm "
             "zet (bv. '... Ik zet de details op het scherm.'). Dat wordt meteen uitgesproken terwijl "
@@ -163,7 +164,9 @@ class AgentLoop:
                         text = (msg.get("content") or "").strip()
                         # "...Ik zoek een kaartje om het te laten zien." and then nothing: speak that
                         # as the answer and let the model do what it promised (once).
-                        if (not nudged and round_i < self._s.max_tool_rounds and _PROMISE.search(text)
+                        looked_up = any(e["name"].split("__")[0] in _INFO_SERVERS for e in executed)
+                        if (not nudged and round_i < self._s.max_tool_rounds
+                                and (_PROMISE.search(text) or looked_up)
                                 and not any(_is_screen(e["name"]) for e in executed)
                                 and any(_is_screen(sp["function"]["name"]) for sp in specs)):
                             nudged = True
@@ -392,8 +395,10 @@ def _with_say(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 _PROMISE = re.compile(r"op het scherm|laat .{0,40}zien|laten zien|kaart(je)?|ik zoek .{0,30}(op|uit)|ik (zet|maak|teken)", re.I)
-_NUDGE = ("Doe nu wat je beloofde: maak de kaart (screen_components en show_card). Je antwoord is al "
-          "uitgesproken, dus zeg verder niets.")
+_NUDGE = ("Zet het nu op het scherm als verlengstuk van je antwoord: maak een kaart (screen_components en "
+          "show_card). Je antwoord is al uitgesproken, dus zeg verder niets.")
+# Servers whose answers get a card on the screen (the user wants a card with every lookup).
+_INFO_SERVERS = ("geo", "staan", "websearch")
 _QUIET_S = 7.0  # speak a progress line after this long without speech
 _PROGRESS_MAX = 3  # progress lines per turn
 
