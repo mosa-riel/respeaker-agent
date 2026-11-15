@@ -110,7 +110,11 @@ class AgentLoop:
             "- De vorige vragen en antwoorden (tot drie, van het afgelopen half uur) staan hierboven. Verwijst "
             "de gebruiker ergens naar ('dat', 'daar', 'laat het zien', 'en morgen?'), kijk daar dan eerst.\n"
             "- Zoek op internet hooguit twee keer per vraag; antwoord daarna met wat je gevonden hebt en zeg "
-            "het eerlijk als het niet zeker is."
+            "het eerlijk als het niet zeker is.\n"
+            "- Gaat de vraag over nu of binnenkort (afsluitingen, evenementen, openingstijden, prijzen), gebruik "
+            "dan alleen informatie waarvan je ziet dat ze van nu is (datum, jaar). Is een bron oud of zonder "
+            "datum, of meldt een tool 'let_op', zeg dan dat je het niet zeker weet in plaats van het als feit te "
+            "brengen. Noem nooit een weekdag bij een datum zonder te controleren dat die klopt met vandaag."
         )
         if context:
             system += f"\n\n=== APPARATEN ===\n{context}"
@@ -190,16 +194,17 @@ class AgentLoop:
                              for tc in tool_calls]
                     says = [str(args.pop(_SAY, "") or "").strip() for _, _, args in calls]  # ours, not the server's
                     progress["doing"] = _doing(calls)
-                    # The model's own words next to the calls ("Ik probeer het nog een keer") are
-                    # progress: speak them now. Not for service calls, where they are the answer.
-                    content = (msg.get("content") or "").strip()
-                    if content and not all(n.endswith("ha_call_service") for _, n, _ in calls):
-                        _progress(content)
                     # A screen tool with 'zeg': speak it now (voice) while the card is being made.
                     if on_say is not None and not spoken and any(_is_screen(n) for _, n, _ in calls):
                         if (early := next((x for x in says if x), "")):
                             on_say(early)
                             spoken = early
+                    # The model's own words next to the calls ("Ik probeer het nog een keer") are
+                    # progress: speak them now. Not for service calls, where they are the answer,
+                    # and not once the answer is spoken (the text often repeats it: said twice).
+                    content = (msg.get("content") or "").strip()
+                    if content and not all(n.endswith("ha_call_service") for _, n, _ in calls):
+                        _progress(content)
                     results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
                     for (tc, name, args), result in zip(calls, results):
                         executed.append({"name": name, "args": args, "result": result})

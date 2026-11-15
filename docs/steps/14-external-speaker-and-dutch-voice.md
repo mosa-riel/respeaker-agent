@@ -203,3 +203,12 @@ and in the add-on options).
   Supervisor). `GET /api/turns?limit=&since=` serves it; `scripts/turn-report.py` prints the
   turns with automatic flags (slow first word, long turn, repeated or failed lookups, unspoken
   model text, a promised card that never came, a lookup without a card, errors).
+- Evaluating the first logged turns showed two more general faults. (1) An A2-closure answer
+  came from last year's article ("From Friday 14 November ... until 17 November"; this year
+  the 14th is a Saturday) and was told as current, with a weekday that did not exist ("maandag
+  17 november"). Rule: for things happening now or soon, only use sources that are visibly
+  current, say so when unsure, and check a weekday against the date. mcp-staan 0.1.2 adds a
+  `let_op` to results whose weekday and date do not fit this year, naming the likely year, and
+  marks results without a date. (2) When the model put text next to a screen call and also
+  filled 'zeg', both were spoken (often the same answer twice); now 'zeg' goes first and the
+  text is not spoken once the answer has been.
