@@ -212,3 +212,16 @@ and in the add-on options).
   marks results without a date. (2) When the model put text next to a screen call and also
   filled 'zeg', both were spoken (often the same answer twice); now 'zeg' goes first and the
   text is not spoken once the answer has been.
+
+## 0.4.38: road questions from official data, more parallel calls
+
+- Evaluating an A2 question (turn log): the answer came from a news-aggregator page whose
+  text lost its end points, and "Weert → Maastricht" (a direction) became "the A2 between
+  Weert and Maastricht is closed"; a Born on-ramp closure on the user's own trip was missed.
+  mcp-geo 0.1.3 adds `verkeer` (NDW open data along the car route from home); the rules now
+  send road questions there instead of to the web.
+- The user allows parallel calls: the rule now asks for everything independent in the same
+  round (weather and route, traffic and weather, two searches, two pages, the card's catalog),
+  not only the screen catalog.
+- Markdown in an early answer ('zeg', or the answer spoken before the card nudge) reached the
+  TTS as `**...**`; it now goes through `_speakable` like the final answer.

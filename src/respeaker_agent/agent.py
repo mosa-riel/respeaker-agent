@@ -96,8 +96,11 @@ class AgentLoop:
             "antwoord zelf, zo dat het zonder scherm te begrijpen is, dan dat je het op het scherm "
             "zet (bv. '... Ik zet de details op het scherm.'). Dat wordt meteen uitgesproken terwijl "
             "jij de kaart maakt; daarna hoef je niets meer te zeggen.\n"
-            "- Werk parallel: weet je al dat er een kaart komt, roep screen_components dan in de EERSTE "
-            "ronde aan, tegelijk met de tools die de informatie ophalen.\n"
+            "- Werk parallel: alles wat niet van elkaar afhangt roep je in DEZELFDE ronde aan (bv. weer en "
+            "route, verkeer en weer, twee zoekvragen, twee pagina's lezen, en screen_components zodra je weet "
+            "dat er een kaart komt). Wacht alleen op een resultaat als je het nodig hebt voor de volgende stap.\n"
+            "- Wegen, opritten, afsluitingen, werkzaamheden of hinder onderweg: gebruik verkeer (de officiële "
+            "gegevens van Rijkswaterstaat en wegbeheerders, langs de route vanaf thuis), niet internet.\n"
             "- Beloof nooit iets zonder het te doen: zeg je dat je iets laat zien, roep dan in dezelfde "
             "beurt de schermtools aan.\n"
             "- Gaat een stap even duren (zoeken, route, weer, een kaart), zet dan een korte, natuurlijke zin "
@@ -178,6 +181,7 @@ class AgentLoop:
                                 and any(_is_screen(sp["function"]["name"]) for sp in specs)):
                             nudged = True
                             if on_say is not None and not spoken:
+                                text = _speakable(text)
                                 on_say(text)
                                 spoken = text
                             convo.append({"role": "assistant", "content": text})
@@ -196,7 +200,7 @@ class AgentLoop:
                     progress["doing"] = _doing(calls)
                     # A screen tool with 'zeg': speak it now (voice) while the card is being made.
                     if on_say is not None and not spoken and any(_is_screen(n) for _, n, _ in calls):
-                        if (early := next((x for x in says if x), "")):
+                        if (early := _speakable(next((x for x in says if x), ""))):
                             on_say(early)
                             spoken = early
                     # The model's own words next to the calls ("Ik probeer het nog een keer") are
