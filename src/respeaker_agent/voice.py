@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
-from .audio import flac_duration_seconds, louder_flac
+from .audio import flac_duration_seconds, louder_flac, pcm_to_loud_flac
 from .local_play import play_pcm_stream
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
@@ -550,10 +550,19 @@ class VoicePipeline:
         event" otherwise) and decodes by type — its pipeline is FLAC and it rejects WAV. Ask
         the engine for the configured format; the device resamples to its 48 kHz pipeline."""
         fmt = self._s.tts_voice_format
-        data = await self._tts.synth_encoded(reply, fmt)
-        if fmt == "flac":
-            data = await asyncio.to_thread(louder_flac, data, self._s.tts_gain_db, self._s.tts_highpass_hz,
-                                           self._s.tts_presence_db)
+        shape = (self._s.tts_gain_db, self._s.tts_highpass_hz, self._s.tts_presence_db)
+        data = None
+        if fmt == "flac" and self._s.tts_provider == "voxtral":
+            # Voxtral's FLAC is streamed (no sample count) and libsndfile can't read it back; ask
+            # for raw float PCM and encode the louder FLAC here.
+            raw = await self._tts.synth_encoded(reply, "pcm")
+            data = await asyncio.to_thread(pcm_to_loud_flac, raw, self._s.tts_pcm_rate, *shape)
+            if data is None:
+                self._trace.emit("info", "TTS pcm not as expected; playing the engine's FLAC unprocessed", level="warn")
+        if data is None:
+            data = await self._tts.synth_encoded(reply, fmt)
+            if fmt == "flac":
+                data = await asyncio.to_thread(louder_flac, data, *shape)
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)

@@ -164,3 +164,12 @@ never spoken.
   The low end it cannot reproduce no longer eats headroom. On a sample reply the share below
   250 Hz dropped by about 4 dB and the 2–4 kHz share rose by about 4.5 dB, at the same overall
   level. 0 switches either off.
+
+## Loudness actually applied (0.4.41)
+
+- 0.4.39/0.4.40 left Voxtral replies unprocessed: Voxtral's FLAC is streamed without a sample
+  count, libsndfile cannot read it (not even block-wise: its seek fails), and `louder_flac`
+  fell back to the original by design. The unit test used a normal FLAC and missed it. With
+  Voxtral the agent now asks for raw float32 PCM and encodes the processed FLAC itself
+  (`audio.pcm_to_loud_flac`); other engines' FLAC still goes through `louder_flac`. On a sample
+  reply: +13.7 dB average level at `tts_gain_db` 8.

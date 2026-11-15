@@ -156,7 +156,7 @@ fall back to `LLM_API_KEY`.
 ## Output loudness
 
 The reSpeaker's media player volume (`device_volume`) is its only output control and is set at
-max on every connect. Replies are made loud in the audio itself: each FLAC reply is peak-normalized
+max on every connect. Replies are made loud in the audio itself (with Voxtral from its raw float PCM, since its streamed FLAC has no sample count and libsndfile cannot read it): each FLAC reply is peak-normalized
 to -1 dBFS and then raised by `tts_gain_db` dB (0–12, default 4) through a soft limiter
 (`audio.louder_flac`; samples above 0.6 bend towards 0.95 instead of clipping). Raise it if the
 speaker is still too quiet; above ~8 dB the limiter starts to work audibly. Before that, the

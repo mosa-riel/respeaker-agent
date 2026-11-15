@@ -103,32 +103,50 @@ def speaker_eq(x: np.ndarray, rate: int, highpass_hz: float, presence_db: float)
     return np.fft.irfft(spec * gain, n=x.size + 2 * pad)[pad:pad + x.size].astype(np.float32)
 
 
+def loud_flac(x: np.ndarray, rate: int, extra_db: float = 4.0, highpass_hz: float = 250.0,
+              presence_db: float = 4.0) -> bytes:
+    """Mono float samples → a reply as loud and clear as the device allows, as FLAC (16-bit, with
+    the sample count in STREAMINFO). The reSpeaker's only output control (its media player
+    volume) is at max, while Voxtral replies peak around -9 dBFS. Shape it for a small speaker
+    (speaker_eq), normalize the peak to -1 dBFS, then add `extra_db` with a soft limiter: samples
+    above 0.6 bend smoothly towards 0.95 instead of clipping, so speech gets louder without
+    crackle."""
+    import soundfile as sf
+
+    x = speaker_eq(x.astype(np.float32), rate, highpass_hz, presence_db)
+    peak = float(np.max(np.abs(x))) if x.size else 0.0
+    if peak >= 1e-4:
+        x = x * (0.89 / peak) * 10 ** (max(0.0, extra_db) / 20)
+        t, c = 0.6, 0.95
+        over = np.abs(x) > t
+        x[over] = np.sign(x[over]) * (t + (c - t) * np.tanh((np.abs(x[over]) - t) / (c - t)))
+    buf = io.BytesIO()
+    sf.write(buf, x.astype(np.float32), rate, format="FLAC", subtype="PCM_16")
+    return buf.getvalue()
+
+
 def louder_flac(data: bytes, extra_db: float = 4.0, highpass_hz: float = 250.0, presence_db: float = 4.0) -> bytes:
-    """Make a TTS reply as loud and clear as the device allows. The reSpeaker's only output
-    control (its media player volume) is at max, while Voxtral replies peak around -9 dBFS. Shape
-    it for a small speaker (speaker_eq), normalize the peak to -1 dBFS, then add `extra_db` with a
-    soft limiter: samples above 0.6 bend smoothly towards 0.95 instead of clipping, so speech
-    gets louder without crackle. Returns FLAC (16-bit, with the sample count in STREAMINFO); on
-    any problem the original bytes."""
+    """loud_flac for a FLAC file; on any problem the original bytes. libsndfile cannot read a
+    streamed FLAC without a sample count (Voxtral's), so Voxtral replies go through pcm_to_loud_flac."""
     import soundfile as sf
 
     try:
         x, rate = sf.read(io.BytesIO(data), dtype="float32")
-        if x.ndim > 1:
-            x = x.mean(axis=1)
-        x = speaker_eq(x, rate, highpass_hz, presence_db)
-        peak = float(np.max(np.abs(x))) if x.size else 0.0
-        if peak < 1e-4:
-            return data
-        y = x * (0.89 / peak) * 10 ** (max(0.0, extra_db) / 20)
-        t, c = 0.6, 0.95
-        over = np.abs(y) > t
-        y[over] = np.sign(y[over]) * (t + (c - t) * np.tanh((np.abs(y[over]) - t) / (c - t)))
-        buf = io.BytesIO()
-        sf.write(buf, y.astype(np.float32), rate, format="FLAC", subtype="PCM_16")
-        return buf.getvalue()
+        return loud_flac(x.mean(axis=1) if x.ndim > 1 else x, rate, extra_db, highpass_hz, presence_db)
     except Exception:  # noqa: BLE001 - never lose the reply over loudness
         return data
+
+
+def pcm_to_loud_flac(data: bytes, rate: int, extra_db: float = 4.0, highpass_hz: float = 250.0,
+                     presence_db: float = 4.0) -> bytes | None:
+    """Raw float32 little-endian mono PCM (Voxtral 'pcm') → loud_flac; None when it does not look
+    like float PCM, so the caller can fall back to the engine's own FLAC."""
+    if not data or len(data) % 4:
+        return None
+    x = np.frombuffer(data, dtype="<f4")
+    if not np.all(np.isfinite(x)) or float(np.max(np.abs(x))) > 4.0:
+        return None
+    return loud_flac(x, rate, extra_db, highpass_hz, presence_db)
 
 
 def flac_duration_seconds(data: bytes) -> float | None:
