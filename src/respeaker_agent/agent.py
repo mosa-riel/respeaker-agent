@@ -22,7 +22,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -40,6 +40,7 @@ class AgentResult:
     rounds: int
     tool_calls: list[dict[str, Any]]  # {name, args, result} per executed call
     messages: list[dict[str, Any]] = field(default_factory=list)  # history to persist (no system)
+    spoken_early: bool = False  # `text` was already handed to on_say while the tools ran
 
 
 class AgentLoop:
@@ -57,6 +58,7 @@ class AgentLoop:
         force_tool: bool = False,
         context: str | None = None,
         note: str | None = None,
+        on_say: Callable[[str], None] | None = None,
     ) -> AgentResult:
         # `history` = prior turns (user/assistant/tool messages, NO system) so
         # follow-ups like "ja" / "doe maar" keep context. `context` = the cached,
@@ -81,7 +83,16 @@ class AgentLoop:
             "uit de lijst; meerdere tegelijk mag als lijst.\n"
             "- Staat iets niet in de lijst: ha_search_entities met area_filter=<ruimte> "
             "en/of domain_filter (geen losse woorden als 'lamp' in query) en negeer "
-            "treffers buiten de gevraagde ruimte. Vind je het niet, zeg dat dan."
+            "treffers buiten de gevraagde ruimte. Vind je het niet, zeg dat dan.\n"
+            "- Het e-paper scherm in de huiskamer is een verlengstuk van je antwoord. Wordt een "
+            "antwoord duidelijker met beeld (getallen, lijstjes, stappen, vergelijkingen, verloop in "
+            "de tijd, plaatsen, routes, richtingen), maak dan een kaart: eerst screen_components "
+            "(de bouwdoos), dan show_card. Vraagt de gebruiker iets op het scherm te zetten of te "
+            "tekenen, doe dat altijd. Bij gewone opdrachten (lampen, rolluiken) geen kaart.\n"
+            "- Bij de EERSTE schermtool vul je 'zeg' met je gesproken antwoord: eerst kort het "
+            "antwoord zelf, zo dat het zonder scherm te begrijpen is, dan dat je het op het scherm "
+            "zet (bv. '... Ik zet de details op het scherm.'). Dat wordt meteen uitgesproken terwijl "
+            "jij de kaart maakt; daarna hoef je niets meer te zeggen."
         )
         if context:
             system += f"\n\n=== APPARATEN ===\n{context}"
@@ -100,10 +111,13 @@ class AgentLoop:
         specs = _with_say(self._tools.specs())
         executed: list[dict[str, Any]] = []
 
-        def _result(text: str, rounds: int) -> AgentResult:
+        spoken = ""  # what on_say already spoke
+
+        def _result(text: str, rounds: int, early: bool = False) -> AgentResult:
             text = _speakable(text)
             convo.append({"role": "assistant", "content": text})
-            return AgentResult(text=text, rounds=rounds, tool_calls=executed, messages=convo)
+            return AgentResult(text=text, rounds=rounds, tool_calls=executed, messages=convo,
+                               spoken_early=early or bool(spoken))
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
             for round_i in range(1, self._s.max_tool_rounds + 1):
@@ -120,6 +134,11 @@ class AgentLoop:
                 calls = [(tc, tc.get("function", {}).get("name", ""), _parse_args(tc.get("function", {}).get("arguments")))
                          for tc in tool_calls]
                 says = [str(args.pop(_SAY, "") or "").strip() for _, _, args in calls]  # ours, not the server's
+                # A screen tool with 'zeg': speak it now (voice) while the card is being made.
+                if on_say is not None and not spoken and any(_is_screen(n) for _, n, _ in calls):
+                    if (early := next((x for x in says if x), "")):
+                        on_say(early)
+                        spoken = early
                 results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
                 for (tc, name, args), result in zip(calls, results):
                     executed.append({"name": name, "args": args, "result": result})
@@ -139,6 +158,11 @@ class AgentLoop:
                 if said and all(name.endswith("ha_call_service") for _, name, _ in calls) \
                         and all(_succeeded(r) for r in results):
                     return _result(said, round_i)
+                # The card is on screen and the answer was given with it: done, no closing round.
+                answer = spoken or said
+                if answer and all(_is_screen(n) and not n.endswith("screen_components") for _, n, _ in calls) \
+                        and all(_screen_ok(r) for r in results):
+                    return _result(answer, round_i, early=bool(spoken))
 
             # Ran out of rounds — one closing answer without tools.
             final = await self._chat(cli, _sent(), None, False)
@@ -285,14 +309,34 @@ def _with_say(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for spec in specs:
         fn = spec.get("function", {})
-        if fn.get("name", "").endswith("ha_call_service"):
+        name = fn.get("name", "")
+        if name.endswith("ha_call_service") or _is_screen(name):
             params = dict(fn.get("parameters") or {})
             props = dict(params.get("properties") or {})
-            props[_SAY] = {"type": "string", "description": "Korte Nederlandse zin die ik uitspreek als dit lukt, bv. 'De eettafel is uit.'"}
+            props[_SAY] = {"type": "string", "description": _SAY_SCREEN if _is_screen(name) else
+                           "Korte Nederlandse zin die ik uitspreek als dit lukt, bv. 'De eettafel is uit.'"}
             params["properties"] = props
             spec = {**spec, "function": {**fn, "parameters": params}}
         out.append(spec)
     return out
+
+
+_SCREEN_TOOLS = ("screen_components", "show_card", "show_page", "show_dashboard", "show_html", "show_text",
+                 "show_image")
+_SAY_SCREEN = ("Je gesproken antwoord, meteen uitgesproken terwijl het scherm wordt gemaakt: eerst kort "
+               "het antwoord zelf, dan dat je het op het scherm zet. Alleen bij de eerste schermtool.")
+
+
+def _is_screen(name: str) -> bool:
+    return name.split("__")[-1] in _SCREEN_TOOLS
+
+
+def _screen_ok(result: Any) -> bool:
+    """A screen tool that put something on the screen (its reply says getoond/bijgewerkt/bewaard)."""
+    if not isinstance(result, dict) or result.get("isError"):
+        return False
+    text = json.dumps(result, ensure_ascii=False).lower()
+    return any(w in text for w in ("getoond", "bijgewerkt", "bewaard", "scherm leeg"))
 
 
 def _succeeded(result: Any) -> bool:

@@ -407,10 +407,23 @@ class VoicePipeline:
 
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
+        early: dict[str, Any] = {}
+
+        def on_say(say: str) -> None:
+            # The model answered in 'zeg' with a screen tool: speak now, the card follows.
+            if early or self._s.audio_sink or not self._s.voice_followup:
+                return
+            self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": say})
+            early["task"] = asyncio.create_task(self._announce(say.replace(_FOLLOW, "").strip(), False))
+
         result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get(),
-                                       note=_NOTE_FOLLOWUP if self._in_followup else _NOTE)
+                                       note=_NOTE_FOLLOWUP if self._in_followup else _NOTE, on_say=on_say)
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
+        if early:
+            await early["task"]  # the spoken answer; the screen shows the rest, session ends
+            self.last_activity = "klaar"
+            return "done"
         reply = result.text or ""
         if _IGNORE in reply.upper():
             self._trace.emit("info", "voice: niet voor mij bedoeld, sessie stopt")
@@ -437,10 +450,23 @@ class VoicePipeline:
             self._run_end()
             self.last_activity = "klaar"
             return "local"
-        # This firmware plays TTS via its media_player fetching a URL ("No url in
-        # TTS_END event" otherwise) and decodes by type — its pipeline is FLAC and it
-        # rejects WAV. Ask the engine for the configured format, publish it on the LAN
-        # audio server, hand the device the URL; it resamples to its 48 kHz pipeline.
+        if self._s.voice_followup:
+            return await self._announce(reply, follow)
+        url, secs = await self._publish_tts(reply, follow)
+        self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
+        # Hold the turn until playback finishes (device plays the URL async). It
+        # only STARTS ~1s after we send the URL (fetch+decode+buffer), so a
+        # generous tail buffer keeps RUN_END from clipping the end.
+        if secs:
+            await asyncio.sleep(min(secs + 1.6, 40.0))
+        self.last_activity = "klaar"
+        return "done"
+
+    async def _publish_tts(self, reply: str, follow: bool) -> tuple[str, float | None]:
+        """Synthesize `reply` and publish it on the LAN audio server → (url, seconds).
+        This firmware plays TTS via its media_player fetching a URL ("No url in TTS_END
+        event" otherwise) and decodes by type — its pipeline is FLAC and it rejects WAV. Ask
+        the engine for the configured format; the device resamples to its 48 kHz pipeline."""
         fmt = self._s.tts_voice_format
         data = await self._tts.synth_encoded(reply, fmt)
         name = f"{uuid.uuid4().hex}.{fmt}"
@@ -451,37 +477,31 @@ class VoicePipeline:
         self._trace.emit("tts", reply, direction="out",
                          data={"format": fmt, "bytes": len(data), "seconds": round(secs, 1) if secs else None,
                                "url": url, "vervolg": follow})
-        if self._s.voice_followup:
-            # Announce path: end this run, then play the reply via the announce API
-            # which AWAITS real playback end (no tail-clipping / duration guessing).
-            # With start_conversation the device re-opens the mic afterwards — a follow-up
-            # without a new wake word; without it the session ends (end chime in _finish).
-            self._run_end()
-            assert self._cli is not None
-            # Set before sending: the device may start the follow-up before the await returns.
-            self._followup_pending = follow
-            try:
-                await self._cli.send_voice_assistant_announcement_await_response(
-                    media_id=url, timeout=min((secs or 6) + 25, 120.0),
-                    text=reply, start_conversation=follow)
-            except Exception as err:  # noqa: BLE001
-                self._followup_pending = False
-                self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
-                return "done"
-            if follow:
-                self._conversing = True  # mic re-opened → in a session
-                self._followups += 1
-            self.last_activity = "klaar"
-            return "followup" if follow else "done"
-        else:
-            self._event(_EVT.VOICE_ASSISTANT_TTS_END, {"url": url})
-            # Hold the turn until playback finishes (device plays the URL async). It
-            # only STARTS ~1s after we send the URL (fetch+decode+buffer), so a
-            # generous tail buffer keeps RUN_END from clipping the end.
-            if secs:
-                await asyncio.sleep(min(secs + 1.6, 40.0))
+        return url, secs
+
+    async def _announce(self, reply: str, follow: bool) -> str:
+        """Announce path: end this run, then play the reply via the announce API, which
+        AWAITS real playback end (no tail-clipping / duration guessing). With
+        start_conversation the device re-opens the mic afterwards — a follow-up without a
+        new wake word; without it the session ends (end chime in _finish)."""
+        url, secs = await self._publish_tts(reply, follow)
+        self._run_end()
+        assert self._cli is not None
+        # Set before sending: the device may start the follow-up before the await returns.
+        self._followup_pending = follow
+        try:
+            await self._cli.send_voice_assistant_announcement_await_response(
+                media_id=url, timeout=min((secs or 6) + 25, 120.0),
+                text=reply, start_conversation=follow)
+        except Exception as err:  # noqa: BLE001
+            self._followup_pending = False
+            self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
+            return "done"
+        if follow:
+            self._conversing = True  # mic re-opened → in a session
+            self._followups += 1
         self.last_activity = "klaar"
-        return "done"
+        return "followup" if follow else "done"
 
     async def _play_wake_chime(self) -> None:
         """Play the bundled wake 'beep' (the upstream wake_word_triggered flac) on the

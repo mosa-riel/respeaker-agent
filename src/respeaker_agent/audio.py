@@ -75,6 +75,9 @@ def make_chime_flac(rate: int = 24000) -> bytes:
     env = np.ones(sig.shape[0])
     env[-fade:] = np.linspace(1, 0, fade)
     sig = (sig * env * 0.4).astype(np.float32)
+    # Lead-in silence: an external speaker's amplifier wakes on the first audio and swallowed
+    # most of this short chime (2026-11-15, chime often inaudible).
+    sig = np.concatenate([np.zeros(int(rate * 0.3), dtype=np.float32), sig])
     buf = io.BytesIO()
     sf.write(buf, sig, rate, format="FLAC")
     return buf.getvalue()

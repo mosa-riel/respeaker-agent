@@ -80,3 +80,24 @@ and in the add-on options).
 - Checked with stubs: command → no follow-up + chime; open answer with [VERVOLG] and a
   question back → follow-up; [NEGEER] in a follow-up → nothing spoken + chime; cap → chime;
   quiet follow-up closes after 2 s, a loud blip extends to 7 s.
+
+## 0.4.30: answer first, the screen follows
+
+- The user wanted Nabu to answer right away and work out the details on the e-paper screen,
+  instead of waiting for the whole tool loop. The screen tools (`screen_components`,
+  `show_card`, `show_page`, `show_dashboard`, `show_html`, `show_text`, `show_image`) get the
+  `zeg` field too. When the model calls a screen tool with `zeg`, the agent hands it to
+  `on_say` at once (agent.run): the voice loop synthesizes and announces it while the model
+  goes on (catalog → card). When the render tools in a round all succeed and the answer was
+  given, the loop ends without a closing LLM round; the session then ends (no follow-up) with
+  the end chime.
+- The runtime tool rules now say the screen is an extension of the answer: use a card for
+  numbers, lists, steps, comparisons, time series, places, routes and directions, always when
+  asked to show or draw something, never for plain commands; put the spoken answer in 'zeg'
+  of the first screen tool, understandable without the screen.
+- Cards come from MCP Screen 0.4.0 (TRMNL Framework building blocks, Vega-Lite charts, PDOK
+  maps); see that repo.
+- End chime: 0.3 s of silence before it; the external speaker's amplifier swallowed the
+  short chime, so the user often did not hear it.
+- Checked with stubs: zeg spoken in round 1, stripped before the MCP call, no third round;
+  voice speaks once, no follow-up, end chime.

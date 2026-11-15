@@ -105,3 +105,11 @@ stripped before TTS. A follow-up waits `followup_listen_ms` (2000) for speech, e
 `[NEGEER]` when the speech was not meant for it, which ends the session quietly. At most
 `followup_max` (3) follow-ups per wake word. The rules ride along as a per-turn note
 (`_NOTE` / `_NOTE_FOLLOWUP` in voice.py), not in the stored system prompt.
+
+## Early answer with the screen (0.4.30)
+
+Screen tools carry `zeg`; the first screen call's `zeg` is spoken immediately via
+`agent.run(on_say=...)` → `VoicePipeline._announce` (no follow-up) while the model builds
+the card. A round of successful render calls then ends the loop without a closing LLM
+round (`AgentResult.spoken_early`). The end chime has 0.3 s of lead-in silence so an
+external speaker's amplifier does not swallow it.
