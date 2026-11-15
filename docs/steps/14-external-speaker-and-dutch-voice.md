@@ -155,3 +155,12 @@ never spoken.
   on a sample reply about 12 dB more average level with almost no limiting. FLAC is re-encoded
   16-bit with the sample count, so playback length is known instead of guessed.
 - The end chime plays at 0.85 of full scale instead of 0.4.
+
+## Speech shaped for a small speaker (0.4.40)
+
+- The speaker is a 4 cm driver on the board's output. Before normalization, `audio.speaker_eq`
+  now applies, zero-phase in the frequency domain, a 12 dB/octave high-pass at
+  `tts_highpass_hz` (default 250) and a broad `tts_presence_db` boost around 3 kHz (default 4).
+  The low end it cannot reproduce no longer eats headroom. On a sample reply the share below
+  250 Hz dropped by about 4 dB and the 2–4 kHz share rose by about 4.5 dB, at the same overall
+  level. 0 switches either off.

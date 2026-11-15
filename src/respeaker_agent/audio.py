@@ -83,18 +83,40 @@ def make_chime_flac(rate: int = 24000) -> bytes:
     return buf.getvalue()
 
 
-def louder_flac(data: bytes, extra_db: float = 4.0) -> bytes:
-    """Make a TTS reply as loud as the device allows. The reSpeaker's only output control (its
-    media player volume) is at max, while Voxtral replies peak around -9 dBFS. Normalize the peak
-    to -1 dBFS, then add `extra_db` with a soft limiter: samples above 0.6 bend smoothly towards
-    0.95 instead of clipping, so speech gets louder without crackle. Returns FLAC (16-bit, with
-    the sample count in STREAMINFO); on any problem the original bytes."""
+def speaker_eq(x: np.ndarray, rate: int, highpass_hz: float, presence_db: float) -> np.ndarray:
+    """Shape speech for a small speaker, zero-phase in the frequency domain: a 12 dB/octave
+    high-pass at `highpass_hz` (a 4 cm driver reproduces almost nothing below ~250 Hz, but that
+    energy still eats headroom and moves the cone) and a broad `presence_db` boost around 3 kHz,
+    where intelligibility sits. 0 switches either off."""
+    if (highpass_hz <= 0 and presence_db == 0) or x.size == 0:
+        return x
+    pad = int(rate * 0.1)  # room for the filter's ringing, so nothing wraps around
+    spec = np.fft.rfft(np.concatenate([np.zeros(pad, x.dtype), x, np.zeros(pad, x.dtype)]))
+    f = np.fft.rfftfreq(x.size + 2 * pad, 1 / rate)
+    gain = np.ones_like(f)
+    if highpass_hz > 0:
+        with np.errstate(divide="ignore"):
+            gain = gain / np.sqrt(1 + (highpass_hz / np.maximum(f, 1e-3)) ** 4)
+    if presence_db:
+        octaves = np.log2(np.maximum(f, 1.0) / 3000.0)
+        gain = gain * 10 ** (presence_db * np.exp(-0.5 * (octaves / 0.6) ** 2) / 20)
+    return np.fft.irfft(spec * gain, n=x.size + 2 * pad)[pad:pad + x.size].astype(np.float32)
+
+
+def louder_flac(data: bytes, extra_db: float = 4.0, highpass_hz: float = 250.0, presence_db: float = 4.0) -> bytes:
+    """Make a TTS reply as loud and clear as the device allows. The reSpeaker's only output
+    control (its media player volume) is at max, while Voxtral replies peak around -9 dBFS. Shape
+    it for a small speaker (speaker_eq), normalize the peak to -1 dBFS, then add `extra_db` with a
+    soft limiter: samples above 0.6 bend smoothly towards 0.95 instead of clipping, so speech
+    gets louder without crackle. Returns FLAC (16-bit, with the sample count in STREAMINFO); on
+    any problem the original bytes."""
     import soundfile as sf
 
     try:
         x, rate = sf.read(io.BytesIO(data), dtype="float32")
         if x.ndim > 1:
             x = x.mean(axis=1)
+        x = speaker_eq(x, rate, highpass_hz, presence_db)
         peak = float(np.max(np.abs(x))) if x.size else 0.0
         if peak < 1e-4:
             return data

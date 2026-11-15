@@ -143,6 +143,10 @@ class Settings:
     # Extra loudness of TTS replies beyond peak normalization, in dB, with a soft limiter
     # (audio.louder_flac). The device volume is the only other control and sits at max.
     tts_gain_db: float = 4.0
+    # Speech shaped for a small speaker (audio.speaker_eq): high-pass below this frequency and a
+    # presence boost around 3 kHz, in dB. 0 = off.
+    tts_highpass_hz: int = 250
+    tts_presence_db: float = 4.0
     # Server-side end-of-speech detection (this firmware streams continuously and
     # expects the server to decide when the user stopped). Energy-based VAD on the
     # 16-bit mic PCM: speech when RMS > vad_threshold; finalize after vad_silence_ms

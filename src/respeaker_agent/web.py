@@ -253,6 +253,7 @@ async def put_config(payload: dict) -> JSONResponse:
         "followup_listen_ms": (500, 30000),
         "followup_max": (0, 20),
         "stt_realtime_min_silence_ms": (100, 5000),
+        "tts_highpass_hz": (0, 600),
     }
     for key, (lo, hi) in int_fields.items():
         if key not in payload:
@@ -265,7 +266,7 @@ async def put_config(payload: dict) -> JSONResponse:
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
     float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0), "vad_speech_prob": (0.1, 0.95),
-                    "tts_gain_db": (0.0, 12.0)}
+                    "tts_gain_db": (0.0, 12.0), "tts_presence_db": (0.0, 9.0)}
     for key, (lo, hi) in float_fields.items():
         if key not in payload:
             continue

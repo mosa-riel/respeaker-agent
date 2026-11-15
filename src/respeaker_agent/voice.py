@@ -552,7 +552,8 @@ class VoicePipeline:
         fmt = self._s.tts_voice_format
         data = await self._tts.synth_encoded(reply, fmt)
         if fmt == "flac":
-            data = await asyncio.to_thread(louder_flac, data, self._s.tts_gain_db)
+            data = await asyncio.to_thread(louder_flac, data, self._s.tts_gain_db, self._s.tts_highpass_hz,
+                                           self._s.tts_presence_db)
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)
