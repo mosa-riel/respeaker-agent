@@ -138,3 +138,15 @@ and in the add-on options).
   Small 0.5-1.7 s but it read the lamp state instead of switching it, Mistral Large 1.8-2.6 s.
   A show_card answer: Mistral Medium 2.4-2.6 s (350-420 tokens), Qwen 13-18 s (2900-3200
   tokens, far more verbose), Mistral Large 11-28 s.
+
+## 0.4.33: no empty promises, screen work in parallel
+
+- "Waar wordt Jupiler gemaakt? Kun je me dat laten zien?" (on Mistral Medium): web search,
+  then the model answered in plain text "... Ik zoek een kaartje om het te laten zien." and
+  the turn ended without a card. Now a final text that promises screen work (`_PROMISE`)
+  while no screen tool ran is spoken as the answer (on_say) and the model is pushed once
+  (`_NUDGE`) to make the card; it is built while that sentence plays.
+- Rules: call screen_components in the first round, together with the tools that fetch the
+  information, when a card is likely; never promise to show something without doing it.
+- Checked with a stub model: search → promise → components → card: answer spoken at round 2,
+  four LLM calls, no closing round.

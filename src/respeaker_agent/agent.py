@@ -93,7 +93,11 @@ class AgentLoop:
             "- Bij de EERSTE schermtool vul je 'zeg' met je gesproken antwoord: eerst kort het "
             "antwoord zelf, zo dat het zonder scherm te begrijpen is, dan dat je het op het scherm "
             "zet (bv. '... Ik zet de details op het scherm.'). Dat wordt meteen uitgesproken terwijl "
-            "jij de kaart maakt; daarna hoef je niets meer te zeggen."
+            "jij de kaart maakt; daarna hoef je niets meer te zeggen.\n"
+            "- Werk parallel: weet je al dat er een kaart komt, roep screen_components dan in de EERSTE "
+            "ronde aan, tegelijk met de tools die de informatie ophalen.\n"
+            "- Beloof nooit iets zonder het te doen: zeg je dat je iets laat zien, roep dan in dezelfde "
+            "beurt de schermtools aan."
         )
         if context:
             system += f"\n\n=== APPARATEN ===\n{context}"
@@ -113,6 +117,7 @@ class AgentLoop:
         executed: list[dict[str, Any]] = []
 
         spoken = ""  # what on_say already spoke
+        nudged = False  # pushed the model once to do the screen work it promised
         # Progress for voice: the model's own text next to tool calls is spoken at once; when it
         # has been quiet for _QUIET_S, a short line says what is going on (at most _PROGRESS_MAX).
         progress = {"last": time.monotonic(), "count": 0, "doing": "Ik denk even na.", "said": set()}
@@ -146,7 +151,20 @@ class AgentLoop:
                     msg = await self._chat(cli, _sent(), specs, force_tool and round_i == 1)
                     tool_calls = msg.get("tool_calls") or []
                     if not tool_calls:
-                        return _result((msg.get("content") or "").strip(), round_i)
+                        text = (msg.get("content") or "").strip()
+                        # "...Ik zoek een kaartje om het te laten zien." and then nothing: speak that
+                        # as the answer and let the model do what it promised (once).
+                        if (not nudged and round_i < self._s.max_tool_rounds and _PROMISE.search(text)
+                                and not any(_is_screen(e["name"]) for e in executed)
+                                and any(_is_screen(sp["function"]["name"]) for sp in specs)):
+                            nudged = True
+                            if on_say is not None and not spoken:
+                                on_say(text)
+                                spoken = text
+                            convo.append({"role": "assistant", "content": text})
+                            convo.append({"role": "user", "content": _NUDGE})
+                            continue
+                        return _result(text, round_i)
 
                     # Keep the assistant turn (with its tool_calls) in the history.
                     convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
@@ -352,6 +370,9 @@ def _with_say(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+_PROMISE = re.compile(r"op het scherm|laat .{0,40}zien|laten zien|kaart(je)?|ik zoek .{0,30}(op|uit)|ik (zet|maak|teken)", re.I)
+_NUDGE = ("Doe nu wat je beloofde: maak de kaart (screen_components en show_card). Je antwoord is al "
+          "uitgesproken, dus zeg verder niets.")
 _QUIET_S = 7.0  # speak a progress line after this long without speech
 _PROGRESS_MAX = 3  # progress lines per turn
 
