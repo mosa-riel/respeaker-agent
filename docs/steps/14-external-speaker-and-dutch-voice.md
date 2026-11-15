@@ -101,3 +101,27 @@ and in the add-on options).
   short chime, so the user often did not hear it.
 - Checked with stubs: zeg spoken in round 1, stripped before the MCP call, no third round;
   voice speaks once, no follow-up, end chime.
+
+## 0.4.31: progress speech, interrupting, time limit
+
+- The user waited long in silence: a route question took ~90 s (the model tried an online
+  router through fetch_page, which cannot read JSON, then web search, then the LLM hung 60 s
+  and the turn failed with red LEDs); a weather card took 20 s over five LLM rounds of 2-8 s.
+  ha_get_state itself is fast; the time is in the LLM rounds. The model even wrote "De
+  routeplanner gaf even niks terug, ik probeer het nog een keer." next to a tool call,
+  which was never spoken.
+- agent.run(on_progress): the model's text next to tool calls is spoken at once (not for
+  service calls, where it is the answer); after `_QUIET_S` (7 s) without speech a line says
+  what is going on (thinking / weather / internet / Home Assistant / making a card / still
+  busy); at most `_PROGRESS_MAX` (3) per question, never the same line twice.
+- Announcements go through one lock (`_say_lock`), so progress, early answer and final
+  answer play in order.
+- Interrupt: a new wake word cancels the question still being worked on (and its queued
+  speech, and the conversation). A progress line that ends far too soon (the firmware stops
+  an announcement on "Okay Nabu") also cancels it. A cancelled turn leaves the device
+  state alone (no RUN_END, no reset, no chime).
+- `_TURN_BUDGET_S` (45 s): then "Dat lukt me nu niet, het duurt te lang." Other failures say
+  "Er ging iets mis, probeer het nog eens." besides the error LEDs.
+- Checked with stubs: progress order then answer; budget message + chime; new wake word
+  cancels without chime; cut-off progress line cancels; quiet watcher speaks during a slow
+  LLM round and names the tool round.

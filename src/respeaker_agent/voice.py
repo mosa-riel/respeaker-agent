@@ -62,6 +62,8 @@ _DEVICE_CHIME_GATE_MS = 600.0
 # follow-up (no wake word) it answers _IGNORE when the speech was not meant for it, e.g. people
 # talking in the room; the session then ends quietly instead of looping.
 _FOLLOW, _IGNORE = "[VERVOLG]", "[NEGEER]"
+_TURN_BUDGET_S = 45.0  # give up on a question after this long, and say so
+_SPEECH_S_PER_CHAR = 0.065  # rough TTS duration, to notice speech cut short by "Okay Nabu"
 _NOTE = ("(Gesproken via de reSpeaker. Verwacht je dat de gebruiker direct nog iets zegt, omdat "
          "je zelf iets vraagt of omdat het een open vraag of uitleg is waar een vervolgvraag "
          "logisch is, eindig je antwoord dan met [VERVOLG]. Na een uitgevoerde opdracht (lamp, "
@@ -137,6 +139,10 @@ class VoicePipeline:
         self._in_followup = False  # this turn is a follow-up (no wake word)
         self._followups = 0  # follow-ups so far in this session (capped by followup_max)
         self._listen_ms = float(settings.vad_prespeech_ms)  # give up when no speech by then
+        self._turn_task: asyncio.Task | None = None  # STT → agent → TTS of the current question
+        self._turn_speech: list[asyncio.Task] = []  # its progress/early announcements
+        self._say_lock = asyncio.Lock()  # one announcement at a time, in order
+        self._last_say = (False, 0.0)  # (device played it, seconds) of the last announcement
         self._chime_url: str | None = None
         self._end_chime_path: str | None = None  # cached end-chime flac for the local sink
         self._gate_ms = 0.0  # ignore mic for this many ms (wake beep bleed) — see _on_audio
@@ -193,6 +199,8 @@ class VoicePipeline:
         if wake_word_phrase:  # a real wake word starts a fresh session (not a follow-up re-listen)
             self._conversing = False
         followup, self._followup_pending = self._followup_pending, False
+        if not followup:
+            self._interrupt("nieuw wekwoord")
         self._in_followup = followup
         if not followup:
             self._followups = 0
@@ -317,9 +325,22 @@ class VoicePipeline:
         # that is also loud enough (vad_threshold).
         return self._vad_speech and loud
 
+    def _interrupt(self, why: str) -> None:
+        """Stop the question still being worked on (the user woke Nabu again or cut it off)."""
+        if self._turn_task is not None and not self._turn_task.done():
+            self._trace.emit("info", f"voice: vraag afgebroken ({why})")
+            self._turn_task.cancel()
+        for t in self._turn_speech:
+            t.cancel()
+        self._turn_speech = []
+        self._convos.clear(self._conv_id)  # what was asked is dropped with it
+
     async def _on_stop(self, aborted: bool) -> None:
         # Device-driven stop (abort, or a firmware that DOES send end). Process
         # whatever we have unless already finalizing.
+        if aborted and self._finalizing:
+            self._interrupt("gestopt op het apparaat")
+            return
         if aborted:
             self._reset()
             self._event(_EVT.VOICE_ASSISTANT_RUN_END)
@@ -350,19 +371,30 @@ class VoicePipeline:
         start = max(0, self._speech_byte - 16000 * 2 * preroll // 1000) if self._speech else 0
         audio = bytes(self._buf[start:])
         self._buf = bytearray()
-        asyncio.create_task(self._finish(audio, spoke))
+        self._turn_task = asyncio.create_task(self._finish(audio, spoke))
 
     async def _finish(self, audio: bytes, spoke: bool) -> None:
-        outcome = "none"  # none | done (replied, session over) | followup | local
+        outcome = "none"  # none | done (replied, session over) | followup | local | cancelled
         try:
             if spoke and audio:
                 outcome = await self._handle_turn(audio)
             else:
                 self._trace.emit("info", "voice: no speech captured")
+        except asyncio.CancelledError:
+            # Interrupted: a new turn may already be running, so leave the device and the
+            # pipeline state alone (no RUN_END, no reset, no chime; see finally).
+            outcome = "cancelled"
         except Exception as err:  # noqa: BLE001 - never leave the device hanging
-            self._trace.emit("error", f"voice turn failed: {err}", level="error")
+            self._trace.emit("error", f"voice turn failed: {err!r}"[:300], level="error")
             self._event(_EVT.VOICE_ASSISTANT_ERROR, {"code": "pipeline_error", "message": str(err)[:120]})
+            if self._s.voice_followup and not self._s.audio_sink:
+                try:
+                    outcome = await self._announce("Er ging iets mis, probeer het nog eens.", False)
+                except Exception:  # noqa: BLE001
+                    pass
         finally:
+            if outcome == "cancelled":
+                return
             # No follow-up (nothing heard, nothing to say, or a reply that needs no answer)
             # → session closes. Chime so you hear the mic shut. (Only with follow-up on.)
             session_end = self._s.voice_followup and outcome in ("none", "done")
@@ -408,16 +440,35 @@ class VoicePipeline:
         self.last_activity = "denken…"
         self._event(_EVT.VOICE_ASSISTANT_INTENT_START)
         early: dict[str, Any] = {}
+        speaks = not self._s.audio_sink and self._s.voice_followup  # announce path available
+        self._turn_speech = []
 
         def on_say(say: str) -> None:
             # The model answered in 'zeg' with a screen tool: speak now, the card follows.
-            if early or self._s.audio_sink or not self._s.voice_followup:
+            if early or not speaks:
                 return
             self._event(_EVT.VOICE_ASSISTANT_TTS_START, {"text": say})
             early["task"] = asyncio.create_task(self._announce(say.replace(_FOLLOW, "").strip(), False))
+            self._turn_speech.append(early["task"])
 
-        result = await self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get(),
-                                       note=_NOTE_FOLLOWUP if self._in_followup else _NOTE, on_say=on_say)
+        def on_progress(line: str) -> None:
+            # What the agent is doing while it works ("Ik haal de weersverwachting op.").
+            if speaks:
+                self._turn_speech.append(asyncio.create_task(self._say_progress(line.replace(_FOLLOW, "").strip())))
+
+        try:
+            result = await asyncio.wait_for(
+                self._agent.run(text, history=self._convos.get(self._conv_id), context=self._home.get(),
+                                note=_NOTE_FOLLOWUP if self._in_followup else _NOTE, on_say=on_say,
+                                on_progress=on_progress),
+                timeout=_TURN_BUDGET_S)
+        except TimeoutError:
+            self._trace.emit("error", f"voice: geen antwoord binnen {_TURN_BUDGET_S:.0f} s", level="error")
+            for t in self._turn_speech:
+                t.cancel()
+            if speaks:
+                return await self._announce("Dat lukt me nu niet, het duurt te lang.", False)
+            return "none"
         self._convos.update(self._conv_id, result.messages)
         self._event(_EVT.VOICE_ASSISTANT_INTENT_END)
         if early:
@@ -462,6 +513,17 @@ class VoicePipeline:
         self.last_activity = "klaar"
         return "done"
 
+    async def _say_progress(self, line: str) -> None:
+        """Speak a progress line; if it stopped far too soon, the user said "Okay Nabu" over it
+        (the firmware then stops the announcement): drop the question."""
+        if not line:
+            return
+        await self._announce(line, False)
+        played, took = self._last_say
+        expected = len(line) * _SPEECH_S_PER_CHAR
+        if played and expected > 1.5 and took < 0.4 * expected:
+            self._interrupt("onderbroken tijdens het spreken")
+
     async def _publish_tts(self, reply: str, follow: bool) -> tuple[str, float | None]:
         """Synthesize `reply` and publish it on the LAN audio server → (url, seconds).
         This firmware plays TTS via its media_player fetching a URL ("No url in TTS_END
@@ -484,19 +546,22 @@ class VoicePipeline:
         AWAITS real playback end (no tail-clipping / duration guessing). With
         start_conversation the device re-opens the mic afterwards — a follow-up without a
         new wake word; without it the session ends (end chime in _finish)."""
-        url, secs = await self._publish_tts(reply, follow)
-        self._run_end()
-        assert self._cli is not None
-        # Set before sending: the device may start the follow-up before the await returns.
-        self._followup_pending = follow
-        try:
-            await self._cli.send_voice_assistant_announcement_await_response(
-                media_id=url, timeout=min((secs or 6) + 25, 120.0),
-                text=reply, start_conversation=follow)
-        except Exception as err:  # noqa: BLE001
-            self._followup_pending = False
-            self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
-            return "done"
+        async with self._say_lock:
+            url, secs = await self._publish_tts(reply, follow)
+            self._run_end()
+            assert self._cli is not None
+            # Set before sending: the device may start the follow-up before the await returns.
+            self._followup_pending = follow
+            t0 = time.monotonic()
+            try:
+                res = await self._cli.send_voice_assistant_announcement_await_response(
+                    media_id=url, timeout=min((secs or 6) + 25, 120.0),
+                    text=reply, start_conversation=follow)
+            except Exception as err:  # noqa: BLE001
+                self._followup_pending = False
+                self._trace.emit("error", f"announce/follow-up failed: {str(err)[:120]}", level="error")
+                return "done"
+            self._last_say = (bool(getattr(res, "success", True)), time.monotonic() - t0)
         if follow:
             self._conversing = True  # mic re-opened → in a session
             self._followups += 1

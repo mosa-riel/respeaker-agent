@@ -113,3 +113,11 @@ Screen tools carry `zeg`; the first screen call's `zeg` is spoken immediately vi
 the card. A round of successful render calls then ends the loop without a closing LLM
 round (`AgentResult.spoken_early`). The end chime has 0.3 s of lead-in silence so an
 external speaker's amplifier does not swallow it.
+
+## Progress, interrupting, time limit (0.4.31)
+
+While the agent works, `on_progress` lines are announced (the model's text next to tool
+calls; after 7 s of silence a line naming the current step; max 3). All announcements go
+through `_say_lock`. "Okay Nabu" during a question cancels it (`_interrupt`); so does a
+progress line cut short by the firmware. A question gets 45 s (`_TURN_BUDGET_S`), then a
+spoken apology; errors are spoken too.

@@ -59,6 +59,7 @@ class AgentLoop:
         context: str | None = None,
         note: str | None = None,
         on_say: Callable[[str], None] | None = None,
+        on_progress: Callable[[str], None] | None = None,
     ) -> AgentResult:
         # `history` = prior turns (user/assistant/tool messages, NO system) so
         # follow-ups like "ja" / "doe maar" keep context. `context` = the cached,
@@ -112,6 +113,25 @@ class AgentLoop:
         executed: list[dict[str, Any]] = []
 
         spoken = ""  # what on_say already spoke
+        # Progress for voice: the model's own text next to tool calls is spoken at once; when it
+        # has been quiet for _QUIET_S, a short line says what is going on (at most _PROGRESS_MAX).
+        progress = {"last": time.monotonic(), "count": 0, "doing": "Ik denk even na.", "said": set()}
+
+        def _progress(text: str) -> None:
+            if on_progress is None or spoken or progress["count"] >= _PROGRESS_MAX or text in progress["said"]:
+                return
+            progress.update(last=time.monotonic(), count=progress["count"] + 1)
+            progress["said"].add(text)
+            on_progress(text)
+
+        async def _watch_quiet() -> None:
+            while True:
+                await asyncio.sleep(1.0)
+                if time.monotonic() - progress["last"] >= _QUIET_S:
+                    _progress(progress["doing"])
+                    progress["last"] = time.monotonic()  # also when nothing was said: no busy loop
+
+        watcher = asyncio.create_task(_watch_quiet()) if on_progress is not None else None
 
         def _result(text: str, rounds: int, early: bool = False) -> AgentResult:
             text = _speakable(text)
@@ -119,54 +139,65 @@ class AgentLoop:
             return AgentResult(text=text, rounds=rounds, tool_calls=executed, messages=convo,
                                spoken_early=early or bool(spoken))
 
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
-            for round_i in range(1, self._s.max_tool_rounds + 1):
-                msg = await self._chat(cli, _sent(), specs, force_tool and round_i == 1)
-                tool_calls = msg.get("tool_calls") or []
-                if not tool_calls:
-                    return _result((msg.get("content") or "").strip(), round_i)
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
+                for round_i in range(1, self._s.max_tool_rounds + 1):
+                    progress["doing"] = "Ik denk even na." if round_i == 1 else "Ik ben er nog mee bezig."
+                    msg = await self._chat(cli, _sent(), specs, force_tool and round_i == 1)
+                    tool_calls = msg.get("tool_calls") or []
+                    if not tool_calls:
+                        return _result((msg.get("content") or "").strip(), round_i)
 
-                # Keep the assistant turn (with its tool_calls) in the history.
-                convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+                    # Keep the assistant turn (with its tool_calls) in the history.
+                    convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
 
-                # Execute EVERY requested call (there can be more than one), concurrently —
-                # "all lights in the kitchen" is N calls in one round; don't run them in series.
-                calls = [(tc, tc.get("function", {}).get("name", ""), _parse_args(tc.get("function", {}).get("arguments")))
-                         for tc in tool_calls]
-                says = [str(args.pop(_SAY, "") or "").strip() for _, _, args in calls]  # ours, not the server's
-                # A screen tool with 'zeg': speak it now (voice) while the card is being made.
-                if on_say is not None and not spoken and any(_is_screen(n) for _, n, _ in calls):
-                    if (early := next((x for x in says if x), "")):
-                        on_say(early)
-                        spoken = early
-                results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
-                for (tc, name, args), result in zip(calls, results):
-                    executed.append({"name": name, "args": args, "result": result})
-                    convo.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", ""),
-                        # Compact, LLM-friendly text (table for record lists) instead of
-                        # raw JSON — fewer tokens, clearer "what happened".
-                        "content": render_result(result),
-                    })
+                    # Execute EVERY requested call (there can be more than one), concurrently —
+                    # "all lights in the kitchen" is N calls in one round; don't run them in series.
+                    calls = [(tc, tc.get("function", {}).get("name", ""), _parse_args(tc.get("function", {}).get("arguments")))
+                             for tc in tool_calls]
+                    says = [str(args.pop(_SAY, "") or "").strip() for _, _, args in calls]  # ours, not the server's
+                    progress["doing"] = _doing(calls)
+                    # The model's own words next to the calls ("Ik probeer het nog een keer") are
+                    # progress: speak them now. Not for service calls, where they are the answer.
+                    content = (msg.get("content") or "").strip()
+                    if content and not all(n.endswith("ha_call_service") for _, n, _ in calls):
+                        _progress(content)
+                    # A screen tool with 'zeg': speak it now (voice) while the card is being made.
+                    if on_say is not None and not spoken and any(_is_screen(n) for _, n, _ in calls):
+                        if (early := next((x for x in says if x), "")):
+                            on_say(early)
+                            spoken = early
+                    results = await asyncio.gather(*(self._dispatch(name, args) for _, name, args in calls))
+                    for (tc, name, args), result in zip(calls, results):
+                        executed.append({"name": name, "args": args, "result": result})
+                        convo.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            # Compact, LLM-friendly text (table for record lists) instead of
+                            # raw JSON — fewer tokens, clearer "what happened".
+                            "content": render_result(result),
+                        })
 
-                # A device command that came with its spoken confirmation (the 'zeg' field, or
-                # text next to the calls): when every call was a service call and all
-                # succeeded, say that now. A second LLM round only to word "it's done" cost
-                # ~0.8 s; on any failure the loop goes on as before.
-                said = next((x for x in reversed(says) if x), "") or (msg.get("content") or "").strip()
-                if said and all(name.endswith("ha_call_service") for _, name, _ in calls) \
-                        and all(_succeeded(r) for r in results):
-                    return _result(said, round_i)
-                # The card is on screen and the answer was given with it: done, no closing round.
-                answer = spoken or said
-                if answer and all(_is_screen(n) and not n.endswith("screen_components") for _, n, _ in calls) \
-                        and all(_screen_ok(r) for r in results):
-                    return _result(answer, round_i, early=bool(spoken))
+                    # A device command that came with its spoken confirmation (the 'zeg' field, or
+                    # text next to the calls): when every call was a service call and all
+                    # succeeded, say that now. A second LLM round only to word "it's done" cost
+                    # ~0.8 s; on any failure the loop goes on as before.
+                    said = next((x for x in reversed(says) if x), "") or (msg.get("content") or "").strip()
+                    if said and all(name.endswith("ha_call_service") for _, name, _ in calls) \
+                            and all(_succeeded(r) for r in results):
+                        return _result(said, round_i)
+                    # The card is on screen and the answer was given with it: done, no closing round.
+                    answer = spoken or said
+                    if answer and all(_is_screen(n) and not n.endswith("screen_components") for _, n, _ in calls) \
+                            and all(_screen_ok(r) for r in results):
+                        return _result(answer, round_i, early=bool(spoken) or answer in progress["said"])
 
-            # Ran out of rounds — one closing answer without tools.
-            final = await self._chat(cli, _sent(), None, False)
-            return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
+                # Ran out of rounds — one closing answer without tools.
+                final = await self._chat(cli, _sent(), None, False)
+                return _result((final.get("content") or "").strip(), self._s.max_tool_rounds)
+        finally:
+            if watcher is not None:
+                watcher.cancel()
 
     async def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
         self._trace.emit("tool", f"→ {name}", direction="out", data={"name": name, "args": args})
@@ -319,6 +350,25 @@ def _with_say(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             spec = {**spec, "function": {**fn, "parameters": params}}
         out.append(spec)
     return out
+
+
+_QUIET_S = 7.0  # speak a progress line after this long without speech
+_PROGRESS_MAX = 3  # progress lines per turn
+
+
+def _doing(calls: list[tuple[Any, str, dict]]) -> str:
+    """A short Dutch line for what the next tool round does (spoken when it is quiet long)."""
+    names = [n.split("__")[-1] for _, n, _ in calls]
+    args = [a for _, _, a in calls]
+    if any(n in ("screen_components", "show_card", "show_html", "show_dashboard") for n in names):
+        return "Ik maak een kaart voor het scherm."
+    if any(a.get("domain") == "weather" or "weather" in str(a.get("entity_id", "")) for a in args):
+        return "Ik haal de weersverwachting op."
+    if any(n in ("web_search", "fetch_page") for n in names):
+        return "Ik zoek het even op internet op."
+    if any(n.startswith("ha_") for n in names):
+        return "Ik kijk even in Home Assistant."
+    return "Ik ben er nog mee bezig."
 
 
 _SCREEN_TOOLS = ("screen_components", "show_card", "show_page", "show_dashboard", "show_html", "show_text",
