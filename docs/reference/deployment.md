@@ -1,110 +1,92 @@
 # Reference — Deployment (Home Assistant add-ons)
 
-> Living doc. The agent + each MCP run as **Home Assistant OS add-ons** (Supervisor on
-> `192.168.18.31`). Each lives in its **own public GitHub repo**, structured as an HA
-> **add-on repository**; the user adds the repo URLs in the Apps store. MCPs speak
-> **streamable-HTTP**; the agent connects by `url` and auto-discovers their hostnames.
+The agent and each MCP server run as **Home Assistant OS add-ons**, each in its own public
+GitHub repo structured as an add-on repository. MCP servers speak **streamable HTTP**; the
+agent connects to them by URL. Install steps and the port table are in the
+[README](../../README.md).
 
-## Repos (public GitHub, `mosa-riel`)
+## Add-on repositories and image
 
-| repo | role | add-on network | MCP port |
-|---|---|---|---|
-| `respeaker-agent` | the agent | `host_network` | ingress 8099, TTS 8731 |
-| `mcp-homeassistant` | HA control (wraps upstream `ha-mcp`) | bridged | 8086 |
-| `mcp-funbox` | demo tools | bridged | 8785 |
-| `mcp-websearch` | DuckDuckGo search | bridged | 8786 |
-| `mcp-screen` | reTerminal e-paper | bridged | 8788 (+ PNG 8799 on LAN) |
+- Each repo has `repository.yaml` at the root and the add-on in a slug subfolder
+  (`<slug>/config.yaml` + `Dockerfile` + source). The Supervisor clones the repo and builds
+  the image locally; no registry or CI.
+- The agent's build context (`respeaker_agent_addon/`) can't see the app at the repo root, so
+  its Dockerfile **git-clones the repo**. An `ADD` of the latest-commit API URL busts the layer
+  cache, so every new commit is cloned fresh instead of reusing stale code.
+- The image installs `requirements.lock` (exported from `uv.lock` with `make lock`), then the
+  app with `--no-deps`. A bare `pip install .` once resolved `mcp` to a new major version and
+  no MCP server connected (step 12).
+- The image includes `bluez` (`bluetoothctl`) and `pulseaudio-utils` (`paplay`).
 
-Each repo: `repository.yaml` at the root + the add-on in a slug subfolder
-(`<slug>/config.yaml` + `Dockerfile` + source). Supervisor clones the repo and builds the
-image locally — no registry/CI needed. The agent's add-on (`respeaker_agent_addon/`) has
-a Dockerfile that **git-clones the repo** into the image, because the build context (the
-subfolder) can't see the app at the repo root.
+## Networking
 
-## Networking rationale
+- **Agent: bridged.** A `host_network` add-on cannot resolve the Supervisor's internal DNS, so
+  it could not reach the MCP add-ons by hostname. Consequences:
+  - The reSpeaker is reached **by IP** (`device_host`, ESPHome API `:6053`); bridged
+    containers have no mDNS.
+  - The device fetches TTS audio from the agent, so `:8731` is published to the LAN
+    (`ports`) and the URL uses `tts_audio_host`, the HA host's LAN IP.
+  - The UI is served through **ingress** (`ingress_port: 8099`, `ingress_stream: true`) and
+    is not on the LAN. With `RESPEAKER_INGRESS=1` a guard also rejects any client other than
+    the ingress proxy `172.30.32.2` (defense in depth). A fetch/EventSource shim adds the
+    `X-Ingress-Path` prefix, so the UI's absolute API paths and the SSE trace stream work
+    through ingress.
+- **MCP add-ons: bridged, internal only.** Git-repo add-ons get a hashed hostname prefix
+  (e.g. `abc123-mcp-funbox`), shown on the add-on's Info tab; add each server in the agent UI
+  as `http://<hostname>:<port>/mcp`.
+- **`mcp-screen`** also publishes its PNG host (`:8799`) to the LAN, because the reTerminal
+  fetches `/screen.png`. It reaches the device API by IP (`reterminal_host`).
 
-- **Agent = `host_network`.** It reaches the reSpeaker by mDNS over the ESPHome API
-  (`:6053`), and the TTS audio host (`tts_server.py`) auto-detects the host's real LAN IP
-  so the device can fetch playback from `:8731` — both need the host stack.
-- **MCPs = bridged**, reachable from the host_network agent by their internal DNS
-  hostname.
-- **`mcp-screen`** is bridged but publishes its PNG port (`8799`) to the host LAN via a
-  `ports` mapping (the reTerminal fetches `/screen.png`). It reaches the device API **by
-  IP** — bridged containers can't do mDNS — so set `reterminal_host` to the device's
-  reserved IP, not `reterminal-e1001.local`.
+## Add-on permissions (agent)
 
-## Audio out + Bluetooth (step 10)
+| manifest key | why |
+|---|---|
+| `ingress: true` | authenticated UI through the HA frontend |
+| `hassio_api: true` | the UI's **Herstart** button (`POST /addons/self/restart`) |
+| `audio: true` | maps the Supervisor PulseAudio server (`PULSE_SERVER`) so `paplay` reaches host sinks, incl. `bluez_sink.<MAC>.a2dp_sink` |
+| `host_dbus: true` | lets the opt-in `bluetooth_control` tools drive the host BlueZ adapter |
 
-Optional: play TTS on a host speaker (incl. a Bluetooth A2DP speaker) instead of the
-reSpeaker's own speaker. The agent add-on grants the host access for it:
+A speaker can be paired once on the host (Terminal add-on: `bluetoothctl pair/trust/connect`)
+or, with `bluetooth_control` on, from the agent's Bluetooth page or by voice. A successful
+`bluetooth_connect` sets `audio_sink` in memory; set `audio_sink` in the add-on options to keep
+it across restarts.
 
-- **`audio: true`** maps the Supervisor PulseAudio server in (`PULSE_SERVER`) so `paplay`
-  reaches host sinks — incl. `bluez_sink.<MAC>.a2dp_sink` once a speaker is connected.
-- **`host_dbus: true`** lets the optional `bluetooth_control` tools drive the host BlueZ
-  adapter via `bluetoothctl`. Image installs `bluez` + `pulseaudio-utils`.
-- Add-on options: **`audio_sink`** (sink name; empty = device speaker; `"default"` = host
-  default) and **`bluetooth_control`** (expose the BT tools; off by default). Both
-  enforced every boot by `addon-run.py`.
+## Config and secrets
 
-Pairing can be done once on the HA OS host (Terminal add-on: `bluetoothctl pair/trust/
-connect`), or — with `bluetooth_control` on — by voice/UI via the agent. `audio_sink` is
-auto-set on a successful `bluetooth_connect`; save config to persist across restart.
+`addon-run.py` is the entrypoint. On every boot it:
 
-## MCP hostname auto-discovery
+- maps the **`api_key`** option to `STT_API_KEY`/`TTS_API_KEY`, and to `LLM_API_KEY` unless
+  **`llm_api_key`** is set (so the LLM can sit at another provider). Keys live only in the
+  environment, never in `config.json`;
+- seeds `/data/config.json` from the shipped config on first boot;
+- writes every scalar add-on option (`SCALAR_OPTS`) into `/data/config.json`, so the
+  Configuration tab is the source of truth for them;
+- forces the ingress bind (`web_host=0.0.0.0`, `web_port=8099`) and sets `RESPEAKER_INGRESS=1`.
 
-Git-repo add-ons get a **hashed DNS hostname prefix** (e.g. `abc123-mcp-funbox`), not
-something predictable — so the `mcp_servers` urls can't be hardcoded. On boot,
-`addon-run.py` (with `hassio_api: true`) queries `http://supervisor/addons`, matches the
-installed MCP add-ons by slug suffix (`mcp_funbox`, `mcp_websearch`, `mcp_screen`,
-`mcp_homeassistant`), and rewrites each `mcp_servers` url to
-`http://<real-hostname>:<port>/mcp`. Best-effort; a no-op when run outside HA. Net:
-**install an MCP add-on → the agent finds it; no url editing.**
+`/data` is persistent: `config.json` survives updates and keeps the UI-owned settings
+(`tts_voice_id`, `system_prompt`, `stt_extra`, `mcp_servers`). The turn log
+(`turns.jsonl`) and recordings live there too, so they are part of the add-on's backups.
 
-## MCP reconnects (0.4.28)
+## MCP connections and reconnects (0.4.28)
 
-Each MCP server's connection is a reconnect loop (`McpManager._serve`). A server that is not
-up yet at boot is retried (5 s, doubling to 60 s), and a server that restarts later (an add-on
-update) is reconnected: a tool call that fails with "Session not found" (or a broken
-transport) asks for a reconnect and retries once on the new session. Tools are re-registered
-on every connect, so new tools from an updated MCP add-on appear without restarting the
-agent (removed ones linger until a restart). Before 0.4.28 every call failed until the agent
-was restarted.
+Each MCP server runs in its own task with a reconnect loop (`McpManager._serve`). A server
+that is not up at boot is retried (5 s, doubling to 60 s); a server that restarts later (for
+example an add-on update) is reconnected. A tool call that fails with "Session not found" or
+a broken transport triggers a reconnect and is retried once on the new session. Tools are
+re-registered on every connect, so new tools from an updated MCP add-on appear without
+restarting the agent; removed ones linger until a restart. Adding or removing a server still
+needs a restart.
 
-## Config & secrets (agent add-on)
+## Home Assistant MCP credential
 
-- `addon-run.py` is the entrypoint. It maps the **`api_key`** option →
-  `LLM_API_KEY`/`STT_API_KEY`/`TTS_API_KEY` env (secrets only in env, never in
-  `config.json`); seeds `/data/config.json` from the shipped config on first boot;
-  auto-discovers MCP urls; always forces the ingress bind (`web_host=0.0.0.0`,
-  `web_port=8099`); sets `RESPEAKER_INGRESS=1`.
-- `/data` is the persistent volume — `config.json` there survives updates and is the
-  runtime source of truth (UI edits persist). Endpoints/models are provider-agnostic
-  (OpenAI-compatible base URLs in `config.json`).
-
-## HA-MCP credential
-
-`mcp-homeassistant`'s `run.py` prefers a pasted `ha_token` option, else falls back to
-`SUPERVISOR_TOKEN` + the Supervisor core proxy (`http://supervisor/core`), enabled by
-`homeassistant_api: true`. The supervisor-token path needs no managed secret and is
-role-scoped (`hassio_role`). Leave the options blank to use it.
-
-## Install
-
-1. **Apps → ⋮ → Repositories**, add each URL (no leading space, or git fails with
-   `protocol ' https' is not supported`):
-   `https://github.com/mosa-riel/{respeaker-agent,mcp-funbox,mcp-websearch,mcp-screen,mcp-homeassistant}`
-2. Install the 4 MCP add-ons (first build is slow — `mcp-screen` installs fonts,
-   `mcp-homeassistant` pulls the upstream image). Start them.
-   - `mcp-screen` → set `reterminal_host` to the device IP.
-   - `mcp-homeassistant` → leave `ha_token`/`ha_url` blank (Supervisor token).
-3. Install the agent add-on → set `api_key` → start.
-4. Open the agent from the HA sidebar (ingress). `/api/health` (rollout strip) shows each
-   MCP `up` with its tool count.
-5. Reflash the reTerminal `online_image` url → `http://<ha-host-ip>:8799/screen.png`
-   (config in `devices/reterminal-e1001/`).
+`mcp-homeassistant`'s `run.py` prefers a pasted `ha_token` option; otherwise it uses
+`SUPERVISOR_TOKEN` through the Supervisor core proxy (`http://supervisor/core`), enabled by
+`homeassistant_api: true`. That path needs no managed secret and is role-scoped
+(`hassio_role`). Leave the options blank to use it.
 
 ## Verification
 
-- Each MCP add-on: Supervisor shows it running; the agent's rollout strip shows it green.
-- Agent UI (ingress): all MCPs `connected`; device link up; end-to-end voice
-  ("okay nabu" → tool → TTS on the reSpeaker); screen push redraws the reTerminal.
+- Each MCP add-on runs in the Supervisor and shows green in the agent's status strip
+  (`GET /api/health`: device link plus each MCP `connected` with its tool count).
+- End to end: wake word → tool call → reply on the speaker; a screen tool redraws the
+  reTerminal.

@@ -1,69 +1,52 @@
 # Step 11 — Add-on config as source of truth + paged web UI
 
-How-to log (append-only). Two changes that go together: centralise the scalar
-settings in the HA add-on config, and split the single-scroll web UI into pages.
+**Version:** 0.4.0
+**Goal:** keep all scalar settings in the HA add-on configuration, and split the single-scroll
+web UI into pages.
 
 ## Config: one source of truth
 
-All **scalar** settings now live in the add-on Configuration tab and are the source
-of truth — `addon-run.py` writes every one into `/data/config.json` **every boot**
-(`SCALAR_OPTS`). So you edit them in *Settings → Add-ons → reSpeaker Agent →
-Configuration*, restart, done.
+All **scalar** settings are add-on options; `addon-run.py` writes each one (`SCALAR_OPTS`)
+into `/data/config.json` on **every boot**. Edit them under *Settings → Add-ons → reSpeaker
+Agent → Configuration* and restart. `config.yaml` has typed `options` + `schema` entries
+(`int(min,max)`, `float(0,1)`, `list(voxtral|openai)`, …).
 
-The web UI keeps only what HA's static schema form can't do well — these stay
-editable in the agent and survive restarts (NOT in `SCALAR_OPTS`):
+The web UI keeps only what HA's static form can't do well; these are not in `SCALAR_OPTS` and
+survive restarts:
 
-- **Voice** — live, refreshable dropdown from `GET /api/voices` (HA config can't fetch
-  a remote list).
-- **System prompt** — long multiline text.
-- **STT extra params** — JSON object.
-- **MCP servers + per-tool enable/disable** — nested list, managed by `/api/mcp`.
+- **Voice**: a live dropdown from `GET /api/voices` (HA config can't fetch a remote list).
+- **System prompt**: long multiline text.
+- **STT extra params**: a JSON object.
+- **MCP servers and per-tool toggles**: a nested list, managed through `/api/mcp`.
 
-Everything else (`device_host`, models, urls, rates, VAD, toggles, `device_volume`,
-`audio_sink`, `bluetooth_control`, …) shows **read-only** on the Settings page with a
-banner pointing to the add-on config. `config.yaml` gained `options` + `schema` entries
-(typed: `int(min,max)`, `float(0,1)`, `list(voxtral|openai)`, etc.) for all of them.
+Everything else is shown read-only on the settings page with a pointer to the add-on config.
 
-## Web UI: sidebar + pages
+## Web UI: sidebar and pages
 
-The 656-line single scroll became a left **sidebar nav** with pages (vanilla JS, no
-build). Nav labels are plain text in the heading font (Poppins 500, no emoji/gradient):
+Vanilla JS, no build. `navigate(page)` toggles the active page and syncs `location.hash`
+(deep links). Clicking a flow-graph node opens the settings page (the per-stage modal was
+removed).
 
 | Page | Contents |
 |---|---|
-| Home | rollout strip · live voice-pipeline flow-graph |
-| Live | trace monitor (prompts/transcripts/tool calls/errors) |
-| Playground | test-chat (manual prompt → agent loop) |
-| Bluetooth | search / pair / connect speakers (only when `bluetooth_control` on) |
-| Instellingen | editable voice/prompt/stt_extra + read-only scalar mirror + device status |
-| MCP servers | server list + per-tool toggles + add-by-URL |
+| Home | status strip, live pipeline flow-graph |
+| Live | trace monitor (prompts, transcripts, tool calls, errors), recordings |
+| Playground | test chat through the agent loop |
+| Bluetooth | scan / connect / disconnect speakers (only with `bluetooth_control`) |
+| Instellingen | voice, prompt, `stt_extra`; read-only add-on settings; device status |
+| MCP servers | server list, per-tool toggles, add by URL |
 
-Routing: `navigate(page)` toggles `.page.active` + `.nav-item.active`, syncs
-`location.hash` (deep-linkable). The **per-stage settings modal was removed** — clicking
-a flow-graph node now opens the Settings page. `drawWires()` re-runs when Home becomes
-visible (flowmap needs a live size).
+## Bluetooth page and REST API
 
-### Bluetooth page + REST API
-
-`bluetooth.py` ops were lifted to module-level reusable coroutines (`bt_list`, `bt_scan`,
-`bt_connect`, `bt_disconnect`) shared by the agent tools AND new endpoints:
-`GET /api/bluetooth` (list + active sink + `enabled` gate), `POST /api/bluetooth/{scan,
-connect,disconnect}`. All gated on `bluetooth_control` (403 otherwise; GET returns
-`{enabled:false}` so the UI hides the nav item). Same security fence as the tools (fixed
-binary, no shell, MAC-validated). The page shows the active sink, a Zoeken (scan) button,
-and per-device Verbinden/Verbreken; a successful connect sets `audio_sink` and the page
-reloads config.
-
-## Files
-
-- `respeaker_agent_addon/config.yaml` — full `options` + `schema` (all scalars)
-- `addon-run.py` — `SCALAR_OPTS` enforced every boot
-- `static/index.html` — sidebar + `.page` wrappers; Settings page; routing JS; modal removed
-- `static/app.css` — `.app-shell/.sidebar/.nav-item/.page/.ro-grid` (+ ≤760px responsive)
-- `web.py` — `GET /api/voices` (added step 10.5) powers the dropdown
+`bluetooth.py` operations became module-level coroutines (`bt_list`, `bt_scan`,
+`bt_connect`, `bt_disconnect`) shared by the agent tools and new endpoints:
+`GET /api/bluetooth` (devices, active sink, `enabled`) and
+`POST /api/bluetooth/{scan,connect,disconnect}`. All are gated on `bluetooth_control` (403
+when off; GET returns `{enabled:false}` so the UI hides the page) and share the tools'
+security fence. A successful connect sets `audio_sink`.
 
 ## Verify
 
-`uv run respeaker-agent` → `GET /` serves the paged UI; `/api/config` carries the new
-keys; `/api/voices` returns voices on a valid key, `{voices:[],error:…}` otherwise (UI
-falls back to manual). Smoke-tested locally: 4 nav items, CSS loaded, graceful no-key.
+`uv run respeaker-agent` → `GET /` serves the paged UI; `/api/config` carries the new keys;
+`/api/voices` returns voices with a valid key and `{voices:[], error:…}` otherwise (the UI
+falls back to a manual id).

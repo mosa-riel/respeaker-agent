@@ -1,14 +1,13 @@
 # reSpeaker Agent
 
-Self-owned voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3**. Talks to the device
+Self-hosted voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3**. It talks to the device
 directly over the ESPHome native API, runs an LLM tool-calling loop fed by **multiple MCP
-servers**, plays TTS on the device **or a host / Bluetooth speaker**, renders **designed
-screens to a reTerminal E1001 e-paper**, and serves a **paged web UI** (live pipeline +
-trace monitor, playground, Bluetooth, settings). Replaces the fragile nested
-Home-Assistant chain.
+servers**, plays replies on the device or on a host / Bluetooth speaker, draws cards on a
+**reTerminal E1001 e-paper** screen, and serves a paged web UI (live pipeline, trace monitor,
+playground, Bluetooth, settings). It replaces a nested chain of Home Assistant integrations.
 
-LLM/STT/TTS are **OpenAI-compatible** — base URLs + model ids are config, so any
-compatible provider (Mistral by default, self-hosted later) works.
+LLM, STT and TTS are **OpenAI-compatible**: base URLs and model ids are configuration, so any
+compatible provider works (Mistral by default; a self-hosted server is a config change).
 
 ## Architecture
 
@@ -16,21 +15,21 @@ Everything runs as **Home Assistant OS add-ons**, each in its own repo:
 
 | add-on | role | network | ports |
 |---|---|---|---|
-| **respeaker-agent** (this) | voice loop + UI | bridged, ingress | ingress 8099, TTS 8731 (LAN) |
-| mcp-homeassistant | HA control (`ha-mcp`) | bridged | 8086 |
+| **respeaker-agent** (this repo) | voice loop + UI | bridged, ingress | ingress 8099, TTS audio 8731 (LAN) |
+| mcp-homeassistant | HA control (wraps `ha-mcp`) | bridged | 8086 |
 | mcp-funbox | demo tools | bridged | 8785 |
-| mcp-websearch | DuckDuckGo | bridged | 8786 |
-| mcp-screen | reTerminal e-paper | bridged | 8788, 8799 (PNG, LAN) |
+| mcp-websearch | DuckDuckGo search | bridged | 8786 |
+| mcp-screen | reTerminal e-paper | bridged | 8788, PNG 8799 (LAN) |
 
-The agent is **bridged** (not host_network) so it can resolve the MCP add-ons by their
-internal hostnames. It reaches the reSpeaker by **IP**, and serves TTS audio the device
-fetches from the HA host's LAN IP. The web UI is via **HA ingress** (authenticated, no
-LAN port).
+The agent is bridged so it can resolve the MCP add-ons by their internal hostnames. It reaches
+the reSpeaker by IP and serves TTS audio that the device fetches from the HA host's LAN IP. The
+web UI is served through HA ingress (authenticated, no LAN port). Details:
+[deployment](docs/reference/deployment.md).
 
 ## Install (Home Assistant OS)
 
-1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories** — add each (one per line,
-   **no leading space** or git fails with `protocol ' https' is not supported`):
+1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories**: add each URL, one per line, with
+   **no leading space** (otherwise git fails with `protocol ' https' is not supported`):
    ```
    https://github.com/mosa-riel/respeaker-agent
    https://github.com/mosa-riel/mcp-homeassistant
@@ -38,101 +37,85 @@ LAN port).
    https://github.com/mosa-riel/mcp-websearch
    https://github.com/mosa-riel/mcp-screen
    ```
-2. **Install the MCP add-ons first**, then the agent. (First build of `mcp-screen` is
-   slow — it pulls Chromium; `mcp-homeassistant` pulls the upstream image.)
-3. Configure + start each (below), then open the agent from the HA sidebar.
-
-> Add-on networking: a host_network add-on can't resolve Supervisor DNS — that's why the
-> agent is bridged. Each git-repo add-on gets a **hashed hostname** (see its **Info →
-> Hostnaam**), e.g. `7de0882b-mcp-homeassistant`.
+2. Install the MCP add-ons first, then the agent. The first build of `mcp-screen` is slow (it
+   pulls Chromium); `mcp-homeassistant` pulls the upstream image.
+3. Configure and start each (below), then open the agent from the HA sidebar.
 
 ## Configure
 
-### reSpeaker Agent → Configuration
-- **API key** — your OpenAI-compatible provider key (Mistral works out of the box).
-- **reSpeaker IP** (`device_host`) — the device's IP, e.g. `192.168.18.151` (IP, not
-  `.local` — bridged add-ons have no mDNS).
-- **HA host IP** (`tts_audio_host`) — this Home Assistant host's LAN IP, e.g.
-  `192.168.18.31`. The reSpeaker fetches spoken replies from here.
-- **Enable voice** — take over the device's wake-word pipeline. Stop HA's own Assist for
-  this device first (only one client may own voice).
+### reSpeaker Agent
+- **API key** (`api_key`): your OpenAI-compatible provider key (Mistral works out of the box).
+  The optional `llm_api_key` lets the LLM use another provider than STT/TTS.
+- **reSpeaker IP** (`device_host`): the device's IP, e.g. `192.168.1.50`. Use the IP, not the
+  `.local` name: bridged add-ons have no mDNS.
+- **HA host IP** (`tts_audio_host`): this Home Assistant host's LAN IP, e.g. `192.168.1.10`.
+  The reSpeaker fetches spoken replies from here.
+- **Enable voice** (`voice_enabled`): take over the device's wake-word pipeline. Stop HA's own
+  Assist pipeline for this device first; only one client can own voice.
 
-The Configuration tab is the **source of truth for all scalar settings** — LLM/STT/TTS
-base-urls + models, rates, VAD, volume, follow-up, plus `audio_sink` and
-`bluetooth_control` (below). `addon-run.py` writes them into `/data/config.json` every
-boot. The agent **UI** keeps only what HA's static form can't do well and persists those
-itself: the **voice dropdown** (fetched from your key), `system_prompt`, `stt_extra`
-(JSON), and MCP server/tool management.
+The add-on Configuration tab is the **source of truth for all scalar settings** (endpoints,
+models, rates, VAD, volume, follow-up, `audio_sink`, `bluetooth_control`, …); `addon-run.py`
+writes them into `/data/config.json` on every boot. The agent UI keeps only what HA's static
+form can't do well: the voice dropdown, `system_prompt`, `stt_extra` (JSON) and MCP
+server/tool management.
 
-### mcp-homeassistant → Configuration
-- Leave **`ha_token`** blank and set **`ha_url`** to `http://supervisor/core` → it
-  authenticates with the injected Supervisor token (no long-lived token needed). Paste a
-  long-lived token only if the proxy path doesn't work for you.
+### mcp-homeassistant
+Leave `ha_token` blank and set `ha_url` to `http://supervisor/core`: it then authenticates
+with the injected Supervisor token. Paste a long-lived token only if that path doesn't work.
 
-### mcp-screen → Configuration
-- **`reterminal_host`** — the reTerminal's IP (e.g. `192.168.18.152`).
+### mcp-screen
+Set `reterminal_host` to the reTerminal's IP.
 
-## Connect the MCP servers (agent UI)
+## Connect the MCP servers
 
-Open the agent → **MCP servers** panel → for each add-on, **Add** a server by URL using
-that add-on's **Hostnaam** + port:
+In the agent UI → **MCP servers**, **Add** each server by URL, using the add-on's hostname
+(shown on its Info tab) and port:
 ```
-home-assistant  http://<hostnaam>:8086/mcp
-funbox          http://<hostnaam>:8785/mcp
-websearch       http://<hostnaam>:8786/mcp
-screen          http://<hostnaam>:8788/mcp
+home-assistant  http://<hostname>:8086/mcp
+funbox          http://<hostname>:8785/mcp
+websearch       http://<hostname>:8786/mcp
+screen          http://<hostname>:8788/mcp
 ```
-**Restart the agent after adding/changing servers** — MCPs connect at startup. Use the
-**↻ Herstart** button in the header (restarts the add-on via the Supervisor). The rollout
-strip turns green per connected server. (Voice / prompt / `stt_extra` edits apply **live**
-— no restart.)
+Any other streamable-HTTP MCP server is added the same way. **Restart the agent after adding
+or removing servers** (the **Herstart** button in the header restarts the add-on via the
+Supervisor); the status strip turns green per connected server. Voice, prompt and `stt_extra`
+edits apply live.
 
-### Curate Home Assistant tools (important)
-`ha-mcp` exposes ~80 tools. In the `home-assistant` MCP card, enable a **lean control
-set** so the model picks well and stays fast:
+### Curate the Home Assistant tools
+`ha-mcp` exposes ~80 tools. Enable a lean control set in the `home-assistant` card so the
+model picks well and stays fast:
 ```
 ha_search_entities, ha_get_state, ha_call_service
 ```
-(Add `ha_get_todo`/`ha_set_todo_item`/`ha_remove_todo_item` for shopping-list control.)
-`ha_call_service` is the on/off workhorse; for "lights in room X" the agent searches with
-`area_filter` + `domain_filter` and calls it per entity.
+Add `ha_get_todo` / `ha_set_todo_item` / `ha_remove_todo_item` for shopping-list control.
+Tool curation is not access control; see [security](docs/reference/security.md).
 
-## Audio output & Bluetooth
+## Audio output and Bluetooth
 
-By default TTS plays on the reSpeaker's own speaker. Set **`audio_sink`** to play on a
-host PulseAudio sink instead — a paired Bluetooth speaker
-`bluez_sink.<MAC>.a2dp_sink`, or `"default"` for the host default. The mic stays the
-reSpeaker. (Follow-up mic-reopen rides the device path, so it's disabled in local-sink
-mode.)
-
-Turn on **`bluetooth_control`** to manage speakers from the app. The **Bluetooth** page
-(and the voice/chat tools) can **search · pair · connect · disconnect**; a successful
-connect sets `audio_sink` automatically. The add-on already grants the host access
-(`audio: true` → Supervisor PulseAudio, `host_dbus: true` → host BlueZ; image ships
-`bluez` + `pulseaudio-utils`) — verified working **in the HA add-on (Docker)**. Unpair is
-a host action: `bluetoothctl remove <MAC>`.
-
-> HA OS itself can't be a Bluetooth A2DP sink — the agent's **host adapter** owns the
-> speaker, not HA. See [voice-audio](docs/reference/voice-audio.md) + [steps/10–11](docs/steps/).
+TTS plays on the reSpeaker's speaker by default. Set `audio_sink` to a host PulseAudio sink
+(`bluez_sink.<MAC>.a2dp_sink` for a paired Bluetooth speaker, or `"default"`) to play there
+instead; the mic stays the reSpeaker. With `bluetooth_control` on, the **Bluetooth** page and
+the agent's tools can scan, pair, connect and disconnect speakers. HA OS itself cannot be an
+A2DP sink, so the add-on drives the host's adapter. See
+[voice & audio](docs/reference/voice-audio.md).
 
 ## Web UI (HA ingress)
 
-Left sidebar, paged: **Home** (live voice-pipeline flow-graph) · **Live** (trace monitor)
-· **Playground** (test chat → full agent loop) · **Bluetooth** (when enabled) ·
-**Instellingen** (voice/prompt/stt_extra editable + read-only mirror of the add-on
-scalars + device status) · **MCP servers**.
+Sidebar pages: **Home** (live pipeline flow-graph) · **Live** (trace monitor, recordings) ·
+**Playground** (test chat through the full agent loop) · **Bluetooth** (when enabled) ·
+**Instellingen** (editable voice/prompt/`stt_extra`, read-only mirror of the add-on settings,
+device status) · **MCP servers**.
 
 ## reTerminal e-paper
 
-Flash the device's `online_image` url to the HA host where `mcp-screen` runs
-(`devices/reterminal-e1001/`):
+The ESPHome config is in `devices/reterminal-e1001/`. Point its `online_image` url at the host
+running `mcp-screen` and flash it:
 ```
-url: "http://<HA-host-ip>:8799/screen.png"
+url: "http://<ha-host-ip>:8799/screen.png"
 uvx esphome run reterminal-e1001.yaml --device <reterminal-ip>   # OTA
 ```
-Then the agent's `show_text` / `show_image` / `show_html` redraw the screen.
-`show_html` renders full HTML/CSS (Chromium) to 800×480 1-bit — use **MDI icons / inline
-SVG, not emoji**, high contrast.
+The screen tools then redraw it. `show_html` renders HTML/CSS (Chromium) to 800×480 1-bit:
+use MDI icons or inline SVG, not emoji, and high contrast.
 
 ## Run locally (dev)
 
@@ -144,11 +127,11 @@ make run                        # http://127.0.0.1:8730
 Run each MCP repo's `server.py` and point the `mcp_servers` urls at
 `http://127.0.0.1:<port>/mcp`.
 
-## Config & secrets
-- **`config.json`** — non-secret settings (UI-editable). Gitignored.
-- **`.env`** — secrets only (`RESPEAKER_NOISE_PSK`, `LLM_API_KEY`; STT/TTS fall back to
+- **`config.json`**: non-secret settings, gitignored.
+- **`.env`**: secrets only (`RESPEAKER_NOISE_PSK`, `LLM_API_KEY`; STT/TTS fall back to
   `LLM_API_KEY`). Never written to disk by the app or returned by the API.
 
-## More
-[`CLAUDE.md`](CLAUDE.md), [`docs/PLAN.md`](docs/PLAN.md),
-[deployment](docs/reference/deployment.md), [security](docs/reference/security.md).
+## Docs
+
+[Index](docs/README.md) · [plan](docs/PLAN.md) · [deployment](docs/reference/deployment.md) ·
+[voice & audio](docs/reference/voice-audio.md) · [security](docs/reference/security.md)

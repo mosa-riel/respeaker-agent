@@ -1,94 +1,69 @@
-# Step 09 — Home Assistant add-ons + MCP-per-repo split
+# Step 09 — Home Assistant add-ons + one repo per MCP
 
-Append-only how-to log. Goal: move the agent off the dev laptop onto the always-on
-HA OS host as a **Home Assistant add-on**, and split each MCP into **its own repo +
-add-on**, all connected over **HTTP** so adding an MCP (incl. external ones) is just a
-url. See [reference/deployment.md](../reference/deployment.md) for the living doc.
+**Versions:** 0.1.x – 0.2.x
+**Goal:** move the agent from a dev machine to the always-on HA OS host as an add-on, and
+split each MCP server into its own repo and add-on, connected over HTTP, so adding an MCP
+(including external ones) is just a URL. Living doc: [deployment](../reference/deployment.md).
 
-## What changed
+## MCP servers: standalone, streamable HTTP, one repo each
 
-### MCPs are now standalone HTTP servers, each in its own repo
-The three local `scripts/*_mcp.py` were **removed from this repo** and rewritten as
-streamable-HTTP MCP servers in sibling repos (GitLab `development` group):
+The local `scripts/*_mcp.py` servers moved out of this repo and became streamable-HTTP
+servers in their own repos:
 
-| repo | port (MCP) | extra | network |
-|---|---|---|---|
-| `mcp-funbox` | 8785 | — | bridged |
-| `mcp-websearch` | 8786 | — | bridged |
-| `mcp-screen` | 8788 | PNG host `:8799` (LAN, `ports`) | bridged |
-| `mcp-homeassistant` | 8086 | wraps upstream `ha-mcp` image | bridged |
+| repo | MCP port | extra |
+|---|---|---|
+| `mcp-funbox` | 8785 | |
+| `mcp-websearch` | 8786 | |
+| `mcp-screen` | 8788 | PNG host `:8799` on the LAN |
+| `mcp-homeassistant` | 8086 | wraps the upstream `ha-mcp` image |
 
-Each: `server.py` + `pyproject.toml` + `Dockerfile` + `config.yaml` (add-on manifest)
-+ `README.md`. The server skeleton is identical — SDK FastMCP
-(`from mcp.server.fastmcp import FastMCP`), `mcp.run(transport="streamable-http")`,
-host/port from env. **Gotcha:** the SDK's DNS-rebinding guard (`TransportSecuritySettings`)
-defaults to a localhost-only Host allowlist with **no glob** — bound to `0.0.0.0` it
-421s every request. These are server↔server endpoints on a trusted internal network, so
-we set `enable_dns_rebinding_protection=False`.
+- Each is `server.py` + `pyproject.toml` + `Dockerfile` + `config.yaml`, using the SDK's
+  FastMCP with `mcp.run(transport="streamable-http")`.
+- **Gotcha:** the SDK's DNS-rebinding guard defaults to a localhost-only Host allowlist with
+  no glob; bound to `0.0.0.0` it answers 421 to everything. These are server-to-server
+  endpoints on an internal network, so `enable_dns_rebinding_protection=False`.
+- `ha-mcp` already ships an HTTP mode (port 8086, path `/mcp`) and a multi-arch image. The
+  add-on builds `FROM` it and its `run.py` maps `SUPERVISOR_TOKEN` → `HOMEASSISTANT_TOKEN`
+  against the core proxy `http://supervisor/core`, with a pasted-token fallback.
+- The agent's `mcp_servers` switched from `command/args` (stdio) to `url`.
 
-`ha-mcp` (homeassistant-ai/ha-mcp v7.6.0) already ships HTTP mode (`ha-mcp-web`, port
-8086, path `/mcp`) and a prebuilt multi-arch image. The add-on builds `FROM` that image
-and overrides the entrypoint with `run.py`, which maps `SUPERVISOR_TOKEN` →
-`HOMEASSISTANT_TOKEN` (with a pasted-long-lived-token fallback) and points it at the
-Supervisor core proxy `http://supervisor/core`.
+## Bug: each MCP connection must own its task
 
-### Agent connects by url, uniform & readable
-`config.json` `mcp_servers` switched from `command/args` (stdio) to `url`:
-`http://local-mcp-<name>:<port>/mcp` (HA internal DNS for bridged add-ons; `local-`
-prefix for local `/addons` installs — will differ for a git-repo install).
-`mcp_client.py` already supported HTTP; no transport change needed there.
-
-### Bug fixed: MCP connections must each own their task
-Switching to HTTP exposed a structured-concurrency bug: `McpManager` stashed
-`streamablehttp_client` + `ClientSession` on one shared `AsyncExitStack` and unwound
-them piecemeal. streamable-HTTP spawns an internal anyio task group whose cancel scope
-must enter AND exit in the same task — a failed HTTP connect raised
+With HTTP, `McpManager` kept every `streamablehttp_client` + `ClientSession` on one shared
+`AsyncExitStack`. streamable HTTP starts an anyio task group whose cancel scope must be
+entered and exited in the same task, so a failed connect raised
 `RuntimeError: Attempted to exit cancel scope in a different task` and **hung startup**.
-Fix: each server now runs in its **own asyncio task** that owns the full `async with`
-chain and stays open (`await self._shutdown.wait()`) until `stop()`. `start()` waits on
-a per-server `ready` event so the tool registry is populated before the agent runs; one
-bad/slow server can't kill the rest. `_safe()` unwraps `ExceptionGroup` to the leaf so a
-down server shows e.g. `[Errno -2] Name or service not known`, not a TaskGroup wrapper.
+Fix: each server runs in its own asyncio task that owns the whole `async with` chain until
+`stop()`; `start()` waits on a per-server `ready` event; `_safe()` unwraps `ExceptionGroup`
+so a down server shows a readable error. One bad server can no longer block the rest.
 
-### Agent add-on
-- `Dockerfile` (`python:3.13-slim`, `pip install .`) + `config.yaml` + `addon-run.py`.
-- `addon-run.py`: maps the `mistral_api_key` option → `LLM/STT/TTS_API_KEY` env (secrets
-  stay in env, never in config.json); seeds `/data/config.json` from the shipped
-  deployment config on first boot; **always** forces `web_host=0.0.0.0`, `web_port=8099`
-  (the ingress bind); sets `RESPEAKER_INGRESS=1`.
-- **Ingress** (`ingress: true`, `ingress_port: 8099`, `ingress_stream: true`): UI served
-  through the HA frontend (authenticated, no LAN port). `web.py` gained an `/` route that
-  injects a fetch/EventSource shim prefixing the `X-Ingress-Path` (zero edits to the
-  ~20 existing absolute-path calls; SSE trace stream works through ingress). Because
-  `host_network` also exposes `:8099` on the LAN, a guard middleware rejects any client
-  that isn't the ingress proxy `172.30.32.2`.
-- **`host_network: true`**: needed so the agent reaches the device by mDNS over `:6053`
-  and the TTS audio host (`:8731`) auto-detects the host's real LAN IP (the device fetches
-  playback from it).
+## Agent add-on
 
-### Rollout-status strip
-New `GET /api/health` aggregates agent + device link + each MCP (`connected` + tool
-count / error) into one object. A small strip in `static/index.html` renders one chip
-per app (green/red), polled by the existing `refresh()`. This is the in-HA "are the apps
-up" view, alongside Supervisor's own add-on page.
+- `Dockerfile` + `config.yaml` + `addon-run.py`. `addon-run.py` maps the API key option to
+  `LLM/STT/TTS_API_KEY` (never into `config.json`), seeds `/data/config.json`, forces the
+  ingress bind (`web_host=0.0.0.0`, `web_port=8099`) and sets `RESPEAKER_INGRESS=1`.
+- **Ingress** (`ingress: true`, `ingress_port: 8099`, `ingress_stream: true`): the UI goes
+  through the HA frontend. The `/` route injects a fetch/EventSource shim that prefixes
+  `X-Ingress-Path`, so the existing absolute API paths and the SSE stream work unchanged.
+  A guard rejects clients other than the ingress proxy `172.30.32.2`.
+- **Status strip:** `GET /api/health` aggregates agent, device link and each MCP
+  (`connected`, tool count or error); the UI shows one chip per component.
+- The Dockerfile clones the repo (the build context can't see the repo root) and busts the
+  layer cache on every new commit (0.2.4); before that, add-on updates kept running stale
+  code.
 
-## Verified locally
-- funbox / websearch / screen: `tools/list` + a tool call over streamable-HTTP. ✅
-- screen: dual server — MCP `:8788` + PNG host `:8799` (404 before publish). ✅
-- agent boot with the 3 MCPs on localhost: `/api/health` shows them connected with
-  tool counts in ~4s. ✅
-- agent boot with unreachable DNS-name urls: startup **completes** (~14s), all 4 MCPs
-  down with clear errors, **0 cancel-scope errors**. ✅
-- ingress `/` render: local-dev keeps absolute urls (shim no-op); ingress mode prefixes
-  `app.css` + carries the ingress path in the shim. ✅
+## Networking: host network → bridged
 
-## TODO (HA-runtime, can't verify off-host)
-1. Install the 4 MCP add-ons + agent add-on from `/addons` (SSH/Samba).
-2. Confirm the internal DNS hostnames match `config.json` urls (Supervisor shows the
-   host); adjust the `local-` prefix if needed.
-3. Confirm `mcp-homeassistant` works via `SUPERVISOR_TOKEN` through the core proxy;
-   else paste a long-lived token in its options.
-4. Reflash the reTerminal `online_image` url → `http://<ha-host-ip>:8799/screen.png`
-   and set `mcp-screen`'s `reterminal_host` to the device's reserved IP.
-5. Stop HA's pipeline ownership of the reSpeaker so the agent owns voice.
-6. Add the `call_service` domain allowlist in `mcp-homeassistant`.
+The first add-on used `host_network` (device by mDNS, TTS host IP auto-detected) and
+discovered the MCP add-ons' hashed hostnames through the Supervisor API. But a host_network
+add-on cannot resolve the Supervisor's internal DNS. 0.2.0 moved the agent to the **bridged**
+network: MCP add-ons resolve by hostname, the device is reached by IP (`device_host`), TTS
+audio is published on `:8731` with the host IP set in `tts_audio_host`, and the UI is
+ingress-only. 0.2.2 dropped the auto-discovery: MCP servers are added by URL in the UI.
+
+## Verified
+
+- funbox / websearch / screen: `tools/list` and a tool call over streamable HTTP.
+- Startup with unreachable MCP URLs completes, with clear per-server errors and no
+  cancel-scope errors.
+- Ingress rendering: local dev keeps absolute URLs; under ingress the shim prefixes them.

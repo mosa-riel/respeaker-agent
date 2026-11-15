@@ -1,63 +1,49 @@
 # Step 06 — Grounding: live home context (HA exposed entities)
 
 **Date:** 2026-06-07
-**Goal:** Stop the model guessing. It invented devices ("plafondlicht"), miscounted,
-and fabricated areas because it had no ground truth — only fuzzy search results.
+**Goal:** stop the model guessing. With only fuzzy search results it invented devices,
+miscounted and fabricated rooms.
 
 ## What was built — `home_context.py` (`HomeContext`)
 
-Caches a room-grouped list of the home's devices, injected into the system prompt so
-the model can only name things that exist. Refreshed at startup, periodically
-(`home_context_refresh_sec`, default 900s), and on demand (`POST /api/home/refresh`,
-the future "vernieuw apparaten" voice command).
+A cached, room-grouped list of the home's devices, injected into the prompt so the model can
+only name things that exist. Refreshed at startup, every `home_context_refresh_sec` (900 s)
+and on demand (`POST /api/home/refresh`, the UI's refresh button).
 
-Built by joining real HA data (admin token — see below):
-- **Which entities** = HA's Assist-exposed set (`ha_get_entity_exposure`). NOT a
-  hardcoded domain list — the user curates exposure in HA, that's the source of
-  truth. Domain is derived from each entity_id; `DOMAIN_TYPE` only prettifies labels.
-- **Friendly names** = `ha_get_state` over the exposed ids.
-- **Room** = entity → device → `area_id` (`ha_get_device` with `detail_level:"full"`,
-  paginated — the default omits the `entities` list) → area name
-  (`ha_list_floors_areas`).
+Built from HA data:
+- **Which entities:** HA's Assist-exposed set (`ha_get_entity_exposure`), not a hardcoded
+  domain list; exposure curated in HA is the source of truth.
+- **Names:** `ha_get_state` over the exposed ids.
+- **Room:** entity → device → `area_id` (`ha_get_device` with `detail_level: "full"`,
+  paginated) → area name (`ha_list_floors_areas`). Step 12 corrected this to prefer the
+  entity's own area.
 
-Each line: `Keukenkopjes [light.keukenkopjes] (lamp)` grouped by room. The
-**entity_id is included** so the model calls tools directly — no search round, no
-guessing a (wrong) id.
+Each line looks like `Lamp keuken [light.lamp_keuken] (lamp)`, grouped by room. The
+**entity_id is included** so the model calls tools directly: no search round, no guessed id.
+`McpManager.call_raw(server, tool, args)` lets HomeContext use tools that are not in the
+agent's `enabled_tools`.
 
-`McpManager.call_raw(server, tool, args)` lets HomeContext read these tools even when
-they're not in the agent's curated `enabled_tools` set.
+## Prompt and sampling
 
-## Prompt + sampling
+- The list is the complete truth: never invent a device, count or room; use the bracketed
+  entity_id; always use a tool for live state.
+- `llm_temperature = 0.1`: at the default temperature mistral-small fabricated even with
+  correct context.
 
-- System prompt: the list is the COMPLETE, ONLY truth; never invent a device/count/
-  area; use the bracketed entity_id directly in tools; always a tool for live state.
-- `llm_temperature = 0.1` — at the default temperature mistral-small fabricated even
-  with correct context. Low temp ≈ no fabrication.
-
-## Results (real HA, mistral-small + 4 HA tools)
+## Results (mistral-small + 4 HA tools)
 
 | Query | Before | After |
 |---|---|---|
-| "zet de keukenkopjes uit" | 3 rounds, ~2.5s (search→call→reply) | **2 rounds, 1.7s** (direct call_service) |
-| "badkamer temperatuur" | guessed wrong id → 404 → search → 3–4 rounds | **2 rounds, 1.1s**, direct get_state, honest "niet beschikbaar" |
-| "heb ik een plafondlicht?" | invented one | grounded — only answers from the list |
+| switch a lamp off | 3 rounds, ~2.5 s (search → call → reply) | 2 rounds, 1.7 s (direct call) |
+| temperature in a room | wrong id → 404 → search, 3–4 rounds | 2 rounds, 1.1 s |
+| ask for a device that does not exist | invented one | answers from the list only |
 
-## Model note
+## Decisions
 
-mistral-small + grounded context + entity_ids + temp 0.1 = fast (1–2s) and reliable
-for both control and facts. medium grounds facts a touch better but is ~2× slower on
-control; small is the better voice-agent default now that context is solid.
-
-## Decisions / open
-
-- **Admin HA token** (user's choice): needed for `ha_get_entity_exposure` + the area
-  registry. We block at our layer via `enabled_tools` (4 HA tools).
-- **OPEN security item:** `ha_call_service` is universal — with an admin token it can
-  call ANY service (incl. `homeassistant.restart`). `enabled_tools` doesn't constrain
-  the service domain. Recommended next: a service-domain allowlist guard on the
-  call_service path (allow light/cover/climate/switch/fan/scene/script/media_player/
-  lock; block homeassistant.*/recorder.*/hassio.*).
-- Conversation memory (step 05 update) + this grounding together fixed the "ja →
-  greeting" and the hallucination classes.
-</content>
-</invoke>
+- **Admin HA token** for the exposure list and the area registry; the agent limits itself via
+  `enabled_tools`. (Step 09 later moved to the role-scoped Supervisor token.)
+- **Open security item:** `ha_call_service` can call any service with an admin token, and
+  `enabled_tools` does not limit the domain. Recommended: a service-domain allowlist (see
+  [security](../reference/security.md)).
+- Conversation memory (step 05) plus this grounding fixed both the lost-context and the
+  hallucination classes.

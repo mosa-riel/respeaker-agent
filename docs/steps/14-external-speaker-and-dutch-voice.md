@@ -1,227 +1,148 @@
-# Step 14 — External speaker, Dutch voice, device wake-sound gate
+# Step 14 — External speaker, Dutch voice, answer-first UX
 
-How-to log (append-only). 2026-11-15.
+**Versions:** 0.4.27 – 0.4.38 · **Date:** 2026-11-15
+**Goal:** good sound and recognition with an external speaker on the reSpeaker, a Dutch
+preset voice, and a voice UX that answers quickly, shows details on the e-paper screen and
+does not keep listening needlessly. Current behaviour is summarised in
+[voice-audio](../reference/voice-audio.md).
 
-## Dutch voice
+## Dutch voice and volume
 
-- Mistral has one Dutch preset: "Lotte", `voice_3145` (female), only on Voxtral TTS 3
-  (`voxtral-mini-tts-3-0`). On `voxtral-mini-tts-2603` the same id returns 400. Set live with
-  `PUT /api/config` `{"tts_model": "voxtral-mini-tts-3-0", "tts_voice_id": "voice_3145"}`.
-- `tts_model` is also an add-on option, which `addon-run.py` writes into config.json on every
-  boot. A restart that day set it back to 2603 while the voice stayed `voice_3145`, and every
-  reply failed with 400. The add-on option now says `voxtral-mini-tts-3-0` too.
-- Voxtral TTS 3 FLAC is 24 kHz mono 24-bit, and STREAMINFO has total samples 0 (streamed),
-  so `flac_duration_seconds` returns None and the announce timeout falls back to 6 + 25 s.
-  The device decodes it fine (checked with device logs: micro_decoder streams and finishes).
-- `GET /api/voices` shows only the first page of Mistral's list (10 voices), so Lotte is not
-  in the dropdown. Mistral's `GET /v2/audio/voices` takes `page_size`, `page_token`, `type`,
-  `gender`, `language` and `query`.
-
-## Volume
-
-- The only output control is the ESPHome media player volume (`volume_max` 1.0 in the
-  formatBCE package), and the agent sets `device_volume` 1.0 on every connect, so it is at
-  max. The aic3104 DAC has no gain option in the package.
-- A Lotte reply peaked at -9 dBFS (RMS -24 dBFS), so a gain or peak normalization of the TTS
-  audio could add 6-8 dB. Not done yet.
+- Mistral's only Dutch preset, "Lotte" (`voice_3145`), works only on Voxtral TTS 3
+  (`voxtral-mini-tts-3-0`); on `voxtral-mini-tts-2603` the same id returns 400.
+- **Lesson:** `tts_model` is also an add-on option and `addon-run.py` rewrites it on every
+  boot. Setting it only via `PUT /api/config` lasted until the next restart, after which every
+  reply failed with 400. Change models in the add-on options.
+- Voxtral TTS 3 FLAC is 24 kHz mono 24-bit with total samples 0 (streamed), so
+  `flac_duration_seconds` returns None and the announce timeout falls back to 6 + 25 s. The
+  device decodes it fine.
+- The only output control is the ESPHome media player volume (`volume_max` 1.0), and the
+  agent sets `device_volume` on every connect; the aic3104 DAC has no gain option in the
+  firmware package. Replies peak around -9 dBFS, so normalization could add 6–8 dB
+  ([TODO](../TODO.md)).
 
 ## Device wake sound in every recording (0.4.27)
 
-- After the external speaker was attached, transcripts became nonsense ("zet de lamellen
-  dicht" → "Zet er een melder in.", and the agent put "Melder" on the shopping list).
-- The firmware's wake word handler plays the wake sound, waits 300 ms and starts the voice
-  assistant (then `lock_beam()` when Beam lock is on). The chime is 0.95 s, so ~0.65 s of it
-  is still playing when the mic stream starts. Recordings opened at -3 to -5 dBFS, decaying,
-  louder than the speech (-15 to -22 dBFS). STT heard chime plus speech, and the STT
-  normalization keyed on the chime. Without a speaker the chime was inaudible.
-- With "Wake sound" off (switch on the device) the user found recognition clearly better.
-- Fix: the agent ignores the first 600 ms of mic audio (`_DEVICE_CHIME_GATE_MS`) after a wake
-  word when the device's "Wake sound" switch is on, the same gate it already used for its own
-  chime on `audio_sink`. `DeviceLink` keeps the latest state per entity name (`states`), and
-  `VoicePipeline` reads "Wake sound" from it.
-- Follow-ups (`start_conversation` after an announcement) also arrive with the wake word
-  phrase ("Okay Nabu", flags 1), but the firmware plays no wake sound for them. The agent
-  sets `_followup_pending` before the announcement and the next start consumes it, so a
-  follow-up is not gated.
-- Checked locally: wake with sound on → 600 ms gate; follow-up → none; sound off → none.
+- With an external speaker attached, transcripts turned to nonsense (a command was misheard
+  and ended up on the shopping list).
+- Cause: the firmware plays the 0.95 s wake sound, waits 300 ms and starts the voice
+  assistant, so ~0.65 s of chime opens every recording at -3 to -5 dBFS, louder than the
+  speech (-15 to -22 dBFS). STT heard both, and its normalization keyed on the chime. Without
+  an external speaker the chime was inaudible to the mic.
+- Fix: with the device's "Wake sound" switch on, the agent ignores the first 600 ms of mic
+  audio after a wake word (`_DEVICE_CHIME_GATE_MS`), the same gate as for its own chime on
+  `audio_sink`. `DeviceLink` keeps the latest state per entity (`states`). Follow-ups also
+  arrive with the wake word phrase but without a chime; `_followup_pending` keeps them
+  ungated.
+- Realtime STT was tried again here and added nothing; it stays off.
 
-## Realtime STT
+## Reliability fixes (0.4.28)
 
-The user turned `stt_realtime` back on, then found it added nothing; it is off again (live
-and in the add-on options).
+- **Double end chime:** a turn without speech was finalized twice (no-speech exit, then the
+  watchdog). `_finalize` now cancels the turn's watchdog unless the watchdog is the caller.
+- **MCP session loss:** after an MCP add-on update every call failed with "Session not found"
+  until the agent restarted. Connections are now a reconnect loop and a call on a lost session
+  reconnects and retries once ([deployment](../reference/deployment.md)).
 
-## 0.4.28: double end chime, MCP reconnects
+## The model decides whether to keep listening (0.4.29)
 
-- Double end chime: after a turn without speech the turn was finalized twice ("no speech
-  captured", then the watchdog). The quick no-speech `_finish` reset `_finalizing` within one
-  0.5 s watchdog sleep, so the watchdog kept running and fired once the device stopped
-  streaming. `_finalize` now cancels the turn's watchdog (unless the watchdog is the caller).
-- MCP: after the MCP Screen add-on was updated (twice that afternoon) every screen command
-  failed with "Session not found" and red LEDs until the agent was restarted. The connection
-  task is now a reconnect loop, and a call on a lost session reconnects and retries once (see
-  `reference/deployment.md`). Tested locally: list_pages, restart the MCP server, list_pages
-  again → "session lost; reconnecting", connected, the second call succeeds.
+Problem: the mic stayed open too long after every reply, and with people talking in the room
+each follow-up transcribed the conversation, answered it and opened the next one.
 
-## 0.4.29: the model decides whether to keep listening
+- A per-turn note (not stored in history) asks the model to end the reply with `[VERVOLG]`
+  when it expects an immediate answer; a reply ending in `?` counts too. Device commands
+  answered in one round never follow up.
+- A follow-up listens `followup_listen_ms` (2000) for speech; any sound above
+  `vad_threshold` extends it to `vad_prespeech_ms`.
+- In a follow-up, speech not meant for the agent is answered with `[NEGEER]`, which ends the
+  session quietly. At most `followup_max` (3) follow-ups per wake word.
 
-- The user found that Nabu listened too long after every reply, and once kept re-opening the
-  mic while people were talking in the room (each follow-up transcribed the conversation,
-  got a reply and opened the next follow-up).
-- Now the model decides per reply: the voice loop sends a note with each turn (agent.run
-  `note`, not stored in the history) asking it to end the reply with `[VERVOLG]` when it
-  expects an answer right away (it asks something, or an open question or explanation). A
-  reply that ends in `?` counts too. Device commands (one round with `zeg`) never follow up:
-  the reply is announced with `start_conversation=False` and the end chime plays right after.
-- A follow-up listens `followup_listen_ms` (2000) for speech; any sound above `vad_threshold`
-  in that window (an "eh") extends it to `vad_prespeech_ms`. No sound: the session ends.
-- In a follow-up the note also says: not meant for you (people talking, loose words, no
-  question or command) → answer only `[NEGEER]`; the session then ends quietly (end chime).
-- At most `followup_max` (3) follow-ups per wake word.
-- Checked with stubs: command → no follow-up + chime; open answer with [VERVOLG] and a
-  question back → follow-up; [NEGEER] in a follow-up → nothing spoken + chime; cap → chime;
-  quiet follow-up closes after 2 s, a loud blip extends to 7 s.
+## Answer first, the screen follows (0.4.30)
 
-## 0.4.30: answer first, the screen follows
+- The screen tools (`screen_components`, `show_card`, `show_page`, `show_dashboard`,
+  `show_html`, `show_text`, `show_image`) get the `zeg` field too. The first screen call's
+  `zeg` is spoken at once (`on_say`) while the model builds the card; when the round's render
+  calls succeed, the turn ends without a closing LLM round.
+- Rules: the screen extends the answer. Use a card for numbers, lists, steps, comparisons,
+  time series, places, routes and directions, and whenever asked to show something; never for
+  plain commands. The spoken answer must make sense without the screen.
+- Cards come from MCP Screen 0.4.0 (TRMNL framework building blocks, Vega-Lite charts, PDOK
+  maps).
+- The end chime gets 0.3 s of lead-in silence; an external speaker's amplifier swallowed the
+  short chime.
 
-- The user wanted Nabu to answer right away and work out the details on the e-paper screen,
-  instead of waiting for the whole tool loop. The screen tools (`screen_components`,
-  `show_card`, `show_page`, `show_dashboard`, `show_html`, `show_text`, `show_image`) get the
-  `zeg` field too. When the model calls a screen tool with `zeg`, the agent hands it to
-  `on_say` at once (agent.run): the voice loop synthesizes and announces it while the model
-  goes on (catalog → card). When the render tools in a round all succeed and the answer was
-  given, the loop ends without a closing LLM round; the session then ends (no follow-up) with
-  the end chime.
-- The runtime tool rules now say the screen is an extension of the answer: use a card for
-  numbers, lists, steps, comparisons, time series, places, routes and directions, always when
-  asked to show or draw something, never for plain commands; put the spoken answer in 'zeg'
-  of the first screen tool, understandable without the screen.
-- Cards come from MCP Screen 0.4.0 (TRMNL Framework building blocks, Vega-Lite charts, PDOK
-  maps); see that repo.
-- End chime: 0.3 s of silence before it; the external speaker's amplifier swallowed the
-  short chime, so the user often did not hear it.
-- Checked with stubs: zeg spoken in round 1, stripped before the MCP call, no third round;
-  voice speaks once, no follow-up, end chime.
+## Progress speech, interrupting, time limit (0.4.31 – 0.4.32)
 
-## 0.4.31: progress speech, interrupting, time limit
+Problem: long silent waits. The time is in LLM rounds (2–8 s each), not in the tools: a
+weather card took five rounds, and one route question ran ~90 s through a page fetcher that
+cannot read JSON, web search and a hung LLM call. Text the model wrote next to tool calls was
+never spoken.
 
-- The user waited long in silence: a route question took ~90 s (the model tried an online
-  router through fetch_page, which cannot read JSON, then web search, then the LLM hung 60 s
-  and the turn failed with red LEDs); a weather card took 20 s over five LLM rounds of 2-8 s.
-  ha_get_state itself is fast; the time is in the LLM rounds. The model even wrote "De
-  routeplanner gaf even niks terug, ik probeer het nog een keer." next to a tool call,
-  which was never spoken.
-- agent.run(on_progress): the model's text next to tool calls is spoken at once (not for
-  service calls, where it is the answer); after `_QUIET_S` (7 s) without speech a line says
-  what is going on (thinking / weather / internet / Home Assistant / making a card / still
-  busy); at most `_PROGRESS_MAX` (3) per question, never the same line twice.
-- Announcements go through one lock (`_say_lock`), so progress, early answer and final
-  answer play in order.
-- Interrupt: a new wake word cancels the question still being worked on (and its queued
-  speech, and the conversation). A progress line that ends far too soon (the firmware stops
-  an announcement on "Okay Nabu") also cancels it. A cancelled turn leaves the device
-  state alone (no RUN_END, no reset, no chime).
-- `_TURN_BUDGET_S` (45 s): then "Dat lukt me nu niet, het duurt te lang." Other failures say
-  "Er ging iets mis, probeer het nog eens." besides the error LEDs.
-- Checked with stubs: progress order then answer; budget message + chime; new wake word
-  cancels without chime; cut-off progress line cancels; quiet watcher speaks during a slow
-  LLM round and names the tool round.
+- `agent.run(on_progress)`: the model's text next to a tool call is spoken at once (except
+  for service calls, where it is the answer); after `_QUIET_S` (7 s) of silence a line names
+  the current step; at most `_PROGRESS_MAX` (3), never the same line twice. Announcements are
+  serialized by `_say_lock`.
+- A new wake word cancels the running question, its queued speech and the conversation; so
+  does a progress line cut short by the firmware. A cancelled turn leaves the device alone.
+- `_TURN_BUDGET_S` (45 s), then a spoken apology; other failures are spoken too.
+- The firmware resets the LEDs to idle after every announcement, so after a progress line the
+  agent re-sends `STT_VAD_END` (thinking) unless the turn is over or speech is playing.
+- LLM comparison with the agent's real prompt and tools, first reply with a tool call:
+  Mistral Medium 0.6 s, Qwen3-235B 0.7–2.0 s, Mistral Small 0.5–1.7 s (but it read a lamp's
+  state instead of switching it), Mistral Large 1.8–2.6 s. A full `show_card` answer: Medium
+  2.4–2.6 s (350–420 tokens), Qwen 13–18 s (2900–3200 tokens), Large 11–28 s.
 
-## 0.4.32: thinking LEDs after a progress line
+## No empty promises (0.4.33 – 0.4.36)
 
-- The firmware ends every announcement with on_end → idle LEDs, so after the first progress
-  line the ring stopped breathing while the agent still worked. After a progress line (0.8 s,
-  once on_end has run) the agent sends STT_VAD_END again, which sets the thinking phase,
-  unless the turn is over or the next announcement is already playing. A question dropped
-  by cutting off a progress line gets RUN_END instead.
-- LLM comparison the same day (agent's real prompt and tools, from the HA host): first
-  reply with a tool call: Mistral Medium 0.6 s, Qwen3-235B at hostyourai 0.7-2.0 s, Mistral
-  Small 0.5-1.7 s but it read the lamp state instead of switching it, Mistral Large 1.8-2.6 s.
-  A show_card answer: Mistral Medium 2.4-2.6 s (350-420 tokens), Qwen 13-18 s (2900-3200
-  tokens, far more verbose), Mistral Large 11-28 s.
+- A final text that promises screen work (`_PROMISE`) while no screen tool ran is spoken as
+  the answer and the model is pushed once (`_NUDGE`) to make the card, built while the
+  sentence plays. The same nudge applies when the model looked something up and answered
+  without a card (0.4.36): every information question gets a card; device commands and small
+  talk do not.
+- Call `screen_components` in the first round, together with the lookups, when a card is
+  likely.
+- Progress lines vary and fit the step ("Ik zoek de route naar Utrecht op.", "Even kijken wat
+  het weer morgen doet.", "Momentje."); the model is asked to add its own short sentence next
+  to slow tool calls.
+- **Where home is:** the context starts with the home town (from `zone.home` via PDOK reverse
+  geocoding) and coordinates, not the street address; "thuis", "hier" or no starting point
+  means the house. mcp-geo treats those words the same.
+- **Memory:** a voice session keeps its last three questions and answers
+  (`ConversationStore.keep_recent`, TTL 30 min), also when interrupted, so "dat", "daar" or
+  "en morgen?" resolve. The agent's own nudges are not stored.
+- **Search at most twice** per question, then answer with what was found and say when it is
+  uncertain (one opening-hours question had taken ten searches).
+- New MCP servers: mcp-geo (places, routes; OpenStreetMap Nominatim with alternatives
+  instead of hand-tuned ranking) and mcp-staan (staan.ai search, market en-gb as there is no
+  Dutch market). Websearch was disabled in the agent. Prefer general improvements over fixes
+  tuned to test questions.
 
-## 0.4.33: no empty promises, screen work in parallel
+## Stop after the answer, honest not-found, turn log (0.4.37)
 
-- "Waar wordt Jupiler gemaakt? Kun je me dat laten zien?" (on Mistral Medium): web search,
-  then the model answered in plain text "... Ik zoek een kaartje om het te laten zien." and
-  the turn ended without a card. Now a final text that promises screen work (`_PROMISE`)
-  while no screen tool ran is spoken as the answer (on_say) and the model is pushed once
-  (`_NUDGE`) to make the card; it is built while that sentence plays.
-- Rules: call screen_components in the first round, together with the tools that fetch the
-  information, when a card is likely; never promise to show something without doing it.
-- Checked with a stub model: search → promise → components → card: answer spoken at round 2,
-  four LLM calls, no closing round.
+- A turn now ends once the answer was spoken and a card rendered in that round, whatever else
+  ran beside it; otherwise a later "Even kijken …" became a second answer nobody heard.
+- When a tool finds nothing or only a similar name, say so (also on the card) and ask if
+  needed; don't repeat the search in other spellings. (A misheard street was searched four or
+  five ways, then a city centre was shown as if it were the street.) mcp-geo 0.1.2 falls back to a
+  fuzzy PDOK search and marks similar names.
+- **Turn log:** every voice turn goes to `/data/turns.jsonl` (`turns.py`), served by
+  `GET /api/turns`, with `scripts/turn-report.py` flagging slow first words, long turns,
+  repeated or failed lookups, unspoken text, missing cards and errors.
+- **Current information:** a road-closure answer came from last year's article and was told
+  as current, with a weekday that did not match the date. Rule: for things happening now or
+  soon, use only visibly current sources, say when unsure, and check weekdays against the
+  date. mcp-staan 0.1.2 adds a `let_op` to results whose weekday and date don't fit this year,
+  and marks results without a date.
+- When the model wrote text next to a screen call and also filled `zeg`, both were spoken;
+  now `zeg` goes first and the text is dropped once the answer has been spoken.
 
-## 0.4.34: natural progress lines, where home is
+## Road questions from official data, parallel calls (0.4.38)
 
-- The user found "Ik ben er nog mee bezig" / "Ik zoek het op internet op" too canned. Progress
-  lines now vary and fit the step ("Ik zoek de route naar Sittard op.", "Even kijken wat het
-  weer morgen doet.", "Even kijken waar Jupille ligt.", "Momentje."), and the rules ask the
-  model to put its own short, natural sentence next to slow tool calls (spoken at once).
-- Home: the context starts with where the house is (zone.home; town via PDOK reverse
-  geocoding, coordinates; not the street address), and the rules say 'thuis', 'hier' or no
-  starting point means the house. mcp-geo treats those words and an empty place the same.
-
-## 0.4.35: remember the last three questions, search less
-
-- The user wants the agent to look back two or three questions when it is unclear what they
-  mean. A voice session used to clear its history at the end. Now it keeps the last three
-  questions with their answers (`ConversationStore.keep_recent`, TTL 30 min instead of 10),
-  also when a question is interrupted; the agent's own nudge message is not stored. The rules
-  tell the model to look there when the user refers back ('dat', 'daar', 'en morgen?').
-- A library-hours question took ten search calls (26 s). Rule: search the web at most twice
-  per question, then answer with what was found and say when it is uncertain.
-- New MCP servers the same day: geo (mcp-geo) and staan (mcp-staan, staan.ai search, market
-  en-gb because staan.ai has no Dutch market); websearch disabled in the agent.
-
-## 0.4.36: a card with every lookup
-
-- The user wants a card with answers ("Misschien moet er altijd een kaartje komen"). When the
-  model looked something up (geo, staan, websearch) and answered without a screen tool, the
-  answer is spoken and the model is pushed once to make a card (the same nudge as for empty
-  promises), so the card is built while the answer plays. The rules say: a card with every
-  information question; not for device commands and small talk.
-- The user asked for general improvements rather than fixes tuned to the test questions;
-  mcp-geo 0.1.1 therefore uses OpenStreetMap Nominatim (importance ranking, POIs) with
-  alternatives for the model instead of hand-tuned place ranking.
-
-## 0.4.37: stop after the answer, say when a place is not found, turn log
-
-- A route question went on after the spoken answer and the card: the round that showed the
-  card also held a place lookup, and the early end only applied when every call in the round
-  was a screen tool. Now a turn ends once the answer has been spoken and a card in that round
-  rendered, whatever else ran next to it (the model's later "Even kijken waar ... ligt" was a
-  second answer nobody heard).
-- A misheard street ("Kapucijnersstraat") was searched four or five times in other spellings,
-  then the centre of Maastricht was shown as if it were the street. Rule: when a tool finds
-  nothing or only a similar name, say so (also on the card), ask if needed, and do not repeat
-  the same search in other spellings. mcp-geo 0.1.2 falls back to a fuzzy PDOK search and
-  marks such results as similar names.
-- The user wants to evaluate all interactions. Every voice turn is now written to
-  `/data/turns.jsonl` (`turns.py`, built from the trace events of the turn): what was heard,
-  each tool call with shortened arguments and result, what was spoken and when, the model's
-  final text, errors, outcome, duration and the add-on version (`BUILD_VERSION` from the
-  Supervisor). `GET /api/turns?limit=&since=` serves it; `scripts/turn-report.py` prints the
-  turns with automatic flags (slow first word, long turn, repeated or failed lookups, unspoken
-  model text, a promised card that never came, a lookup without a card, errors).
-- Evaluating the first logged turns showed two more general faults. (1) An A2-closure answer
-  came from last year's article ("From Friday 14 November ... until 17 November"; this year
-  the 14th is a Saturday) and was told as current, with a weekday that did not exist ("maandag
-  17 november"). Rule: for things happening now or soon, only use sources that are visibly
-  current, say so when unsure, and check a weekday against the date. mcp-staan 0.1.2 adds a
-  `let_op` to results whose weekday and date do not fit this year, naming the likely year, and
-  marks results without a date. (2) When the model put text next to a screen call and also
-  filled 'zeg', both were spoken (often the same answer twice); now 'zeg' goes first and the
-  text is not spoken once the answer has been.
-
-## 0.4.38: road questions from official data, more parallel calls
-
-- Evaluating an A2 question (turn log): the answer came from a news-aggregator page whose
-  text lost its end points, and "Weert → Maastricht" (a direction) became "the A2 between
-  Weert and Maastricht is closed"; a Born on-ramp closure on the user's own trip was missed.
-  mcp-geo 0.1.3 adds `verkeer` (NDW open data along the car route from home); the rules now
-  send road questions there instead of to the web.
-- The user allows parallel calls: the rule now asks for everything independent in the same
-  round (weather and route, traffic and weather, two searches, two pages, the card's catalog),
-  not only the screen catalog.
-- Markdown in an early answer ('zeg', or the answer spoken before the card nudge) reached the
-  TTS as `**...**`; it now goes through `_speakable` like the final answer.
+- A road answer from a news-aggregator page lost the end points: a direction ("toerit X ri.
+  Y") became "the road between X and Y is closed", and an on-ramp closure on the route from
+  home was missed. mcp-geo 0.1.3 adds `verkeer` (NDW open data along the car route from
+  home); the rules send road questions there instead of to the web.
+- The model is asked to put everything independent in the same round (weather and route,
+  traffic and weather, two searches, the card catalog), which runs in parallel.
+- Early answers (`zeg`, or the answer spoken before a card nudge) now go through `_speakable`
+  too; markdown had reached TTS.

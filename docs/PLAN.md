@@ -2,89 +2,72 @@
 
 ## Goal
 
-A single, self-owned voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3** that
-replaces the fragile nested Home-Assistant integration chain. It:
+A single, self-hosted voice agent for the **reSpeaker XVF3800 + XIAO ESP32S3** that replaces
+a fragile nested chain of Home Assistant integrations. It:
 
-1. **Owns the device audio** — talks to the ESP32 directly over the ESPHome native
-   API (on-device wake word stays).
-2. Runs an **LLM tool-calling loop** whose tools come from **multiple MCP servers**
-   (Home Assistant first; more later).
-3. Renders **custom screens to the reTerminal E1001 e-paper** depending on the
-   request (also an ESPHome device).
-4. Uses **OpenAI-compatible** STT/LLM/TTS endpoints (Mistral now: Voxtral + chat;
-   Piper for TTS) — endpoint base_url is swappable to a future self-hosted model.
-5. Exposes a **local web UI** for config + a **live trace monitor** of everything
-   flowing through the pipeline.
+1. **Owns the device audio**: talks to the ESP32 directly over the ESPHome native API; the
+   wake word stays on the device.
+2. Runs an **LLM tool-calling loop** whose tools come from **multiple MCP servers** (Home
+   Assistant, screen, search, …).
+3. Shows **cards on a reTerminal E1001 e-paper** screen next to the spoken answer.
+4. Uses **OpenAI-compatible** STT/LLM/TTS endpoints (Mistral by default), so a self-hosted
+   model is a base-URL change.
+5. Exposes a **web UI** for configuration and a **live trace monitor** of the pipeline.
 
 ## Architecture
 
 ```
-agent service (Python, asyncio)
-├─ device layer  (aioesphomeapi)
-│   ├─ reSpeaker: wake event → mic audio in → TTS audio out
-│   └─ reTerminal: push rendered screen (e-paper)   [phase 3]
-├─ voice loop    wake → STT → agent → TTS → back to reSpeaker        [phase 2]
-├─ agent loop    OpenAI-compatible /chat/completions + tools
-│                 aggregated from N MCP servers (+ a built-in show_screen tool)
-├─ trace bus     every stage emits structured events (trace.py)
-└─ FastAPI       local UI: status, config, live monitor (SSE)
+agent (Python, asyncio) — HA add-on, bridged network, UI via ingress
+├─ device layer  aioesphomeapi → reSpeaker: wake, mic audio, announcements
+├─ voice loop    wake → VAD → STT → agent → TTS → device speaker or host sink
+├─ agent loop    /chat/completions + tools from N MCP servers (+ opt-in Bluetooth tools)
+├─ home context  room-grouped device list from HA, injected into the prompt
+├─ trace bus     every stage emits structured events; turn log in /data/turns.jsonl
+├─ TTS audio     LAN HTTP server (:8731) the device fetches replies from
+└─ FastAPI       paged UI: pipeline, live trace, playground, Bluetooth, settings, MCP
+
+MCP add-ons (one repo each, streamable HTTP): homeassistant, screen, websearch, funbox, …
 ```
 
-### Key design decisions
-- **Python**, not Go: `aioesphomeapi` implements the native voice flow and drives
-  both ESPHome devices; Pillow renders e-paper. Go would mean hand-writing the voice
-  state machine + rendering.
-- **OpenAI-compatible `/chat/completions` + `tools`**, NOT Mistral's proprietary
-  Agents API — stays provider-agnostic (Mistral → self-hosted later). `tool_choice`
-  `"any"` forces a call on must-act turns.
-- **Verify, don't trust** the model: assert the tool actually ran / state changed
-  before reporting success. (Small models hallucinate "done" — that's why HA's
-  fallback needed `mistral-medium`.)
-- Tool schema = OpenAI/MCP shape: `{"type":"function","function":{name,description,parameters}}`.
+## Key design decisions
+
+- **Python**: `aioesphomeapi` implements the native voice flow; Go would mean hand-writing
+  that state machine.
+- **OpenAI-compatible `/chat/completions` + `tools`**, not Mistral's Agents API, to stay
+  provider-agnostic. `tool_choice: "any"` can force a call on must-act turns.
+- **Verify, don't trust**: report what the tool actually returned, not the model's "done".
+- **Tools come from MCP servers reached by URL**, one add-on per server, so adding a source
+  is configuration only.
+- **Ground the model** in a list of the home's real devices with entity ids, so it acts
+  directly and does not invent devices (steps 06, 12).
 
 ## Phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Device link + web UI + live trace monitor | ✅ done (step 01) |
-| 2 | Voice flow: wake → mic audio → STT(Voxtral) → LLM(+MCP tools) → TTS(Voxtral TTS) | ✅ working on hardware (server-VAD, FLAC-URL TTS, follow-up + chime, flow-graph UI, multi-MCP) — see steps 02–08 |
-| 3 | `show_screen` → render (Pillow) + push to reTerminal e-paper | 🔶 reTerminal flashed (ESPHome) + push proven; screen-MCP built as own repo/add-on (`mcp-screen`) |
-| 4 | MCP client layer + multi-server config UI; tool dispatch | ✅ (overlaps p2); MCPs now HTTP, one repo each |
-| 5 | Package as HA add-ons; deploy on the HA host | 🔶 in progress — agent + 4 MCP add-ons built & verified locally; HA-host install pending. See [steps/09](steps/09-ha-addons-and-mcp-split.md) + [reference/deployment.md](reference/deployment.md) |
+| 1 | Device link, web UI, live trace monitor | done (step 01) |
+| 2 | Voice: wake → mic → STT → LLM + MCP tools → TTS | done (steps 02–08, tuned in 12–14) |
+| 3 | e-paper screen via `mcp-screen` | done: reTerminal on ESPHome, cards next to answers (step 14) |
+| 4 | MCP client layer, multi-server config UI, tool dispatch | done (steps 04, 09) |
+| 5 | Home Assistant add-ons on the HA host | done (steps 09–11; [deployment](reference/deployment.md)) |
 
-### Phase 2 notes
-- **TTS = Mistral Voxtral TTS** (`voxtral-mini-tts-2603`), not Piper — same
-  provider as STT+chat, Dutch, ~0.8s TTFB on `pcm`, voice cloning, open weights.
-  Pluggable behind `tts.py` so a local server is a config swap. See
-  [reference/voice-audio.md](reference/voice-audio.md). (Done: step 02.)
-- The voice flow over the native API uses `VoiceAssistant*` messages incl.
-  `VoiceAssistantAudio` (audio over the TCP API, no separate UDP). Confirmed in
-  the installed `aioesphomeapi`: `subscribe_voice_assistant(handle_start,
-  handle_stop, handle_audio)` with the `API_AUDIO` subscription flag; events via
-  `send_voice_assistant_event(...)`, TTS via `send_voice_assistant_audio(bytes)`.
-- **Conflict:** only one client can be the device's voice handler. While HA still
-  has the device adopted, HA owns voice. To let the agent own it, stop HA from
-  handling this device's pipeline (or remove it from HA).
-- Emit at every step: `wake`, `stt` (transcript), `llm-req` (full prompt+tools),
-  `llm-rsp`, `tool` (name+args+result), `tts` (text) → all visible in the monitor.
+### Voice over the native API
+- Audio travels over the TCP API (`subscribe_voice_assistant` with `API_AUDIO`), not UDP.
+- **Only one client can be the device's voice handler.** Stop Home Assistant's Assist
+  pipeline for the device before the agent takes over (`voice_enabled`).
+- Every stage emits to the trace (`wake`, `stt`, `llm-req`, `llm-rsp`, `tool`, `tts`).
 
-### Phase 3 notes — reTerminal e-paper via a screen-MCP
-- reTerminal E1001 = ESP32-S3 + 7.5" mono e-paper 800x480, deep-sleeps, ships with
-  SenseCraft (cloud, no local API) → **flashed with ESPHome** for local control
-  (`../ReSpeaker/devices/reterminal-e1001/`). Pinout from Seeed's ESPHome cookbook.
-- **Push pattern (proven on hardware):** the device has `online_image`
-  (`update_interval: never`) + an ESPHome API service `refresh_screen`. A server
-  hosts a rendered PNG; calling `refresh_screen` (via `aioesphomeapi.execute_service`)
-  makes the device fetch + redraw. Agent-initiated, near-instant (e-paper refresh
-  ~2-5s, no video).
-- **Architecture:** a dedicated **screen-MCP** owns this — tools
-  `show_text`/`show_image`/`clear_screen` render the PNG, host it (:8799), and trigger
-  the device. The agent just calls the tool. Now its **own repo `mcp-screen`** running as
-  a standalone streamable-HTTP MCP / HA add-on (step 09). Remaining: reflash the device's
-  online_image url → `http://<ha-host-ip>:8799/screen.png`.
+### e-paper screen
+- The reTerminal E1001 (ESP32-S3, 7.5" 800×480 mono e-paper) ships with SenseCraft (cloud, no
+  local API); it is flashed with ESPHome for local control (`devices/reterminal-e1001/`).
+- Push pattern: the device has `online_image` (`update_interval: never`) and an API service
+  `refresh_screen`. `mcp-screen` renders a PNG, hosts it on `:8799`, and calls the service;
+  the device fetches and redraws (2–5 s).
 
-## Security gates (enforced)
+## Security gates
 
-- No binding off `127.0.0.1` without auth + CSRF + same-origin.
-- No launching MCP subprocesses from UI-supplied `command`/`args` — server-side
-  allowlist only. See [reference/security.md](reference/security.md).
+- No binding off `127.0.0.1` without auth + CSRF + same-origin (ingress satisfies this in the
+  add-on).
+- Never launch MCP subprocesses from UI-supplied `command`/`args`; server-side allowlist only.
+
+See [reference/security.md](reference/security.md).

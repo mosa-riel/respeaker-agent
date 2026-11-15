@@ -5,6 +5,9 @@ Dependencies are locked via `uv.lock`.
 
 ## Direct dependencies
 
+The core set from the scaffold; `pyproject.toml` has the current list (regenerate the SBOM
+to match).
+
 | Package | Role | License |
 |---|---|---|
 | aioesphomeapi | ESPHome native-API client (device + voice flow) | MIT |
@@ -16,17 +19,17 @@ Dependencies are locked via `uv.lock`.
 | cryptography / noiseprotocol / chacha20poly1305-reuseable | ESPHome Noise transport | Apache-2.0 / BSD / MIT |
 | protobuf | ESPHome API wire format | BSD-3-Clause |
 
-**Frontend:** no JS build — vanilla HTML/JS. Styling lifted from
-`mosa.cloud.sources/commander` (internal). Fonts: Poppins + Open Sans (SIL OFL 1.1).
+**Frontend:** no JS build, vanilla HTML/JS. Styling adapted from an internal project.
+Fonts: Poppins + Open Sans (SIL OFL 1.1).
 
 ## License posture
 
-All permissive (MIT/BSD/Apache/PSF) except **`zeroconf` (LGPL-2.1-or-later)** — used
-as an unmodified library (dynamic import); fine for a self-hosted, non-distributed
-tool. Re-check if ever statically bundled or redistributed.
+All permissive (MIT/BSD/Apache/PSF) except **`zeroconf` (LGPL-2.1-or-later)**, used as
+an unmodified library (dynamic import); fine for a self-hosted, non-distributed tool.
+Re-check if it is ever statically bundled or redistributed.
 
 ## Regenerate
 
 ```bash
-uvx --from cyclonedx-bom cyclonedx-py environment .venv -o sbom.json
+make sbom    # scripts/gen-sbom.sh: uv sync + cyclonedx-py environment .venv -o sbom.json
 ```
