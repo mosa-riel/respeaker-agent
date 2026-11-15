@@ -146,3 +146,12 @@ never spoken.
   traffic and weather, two searches, the card catalog), which runs in parallel.
 - Early answers (`zeg`, or the answer spoken before a card nudge) now go through `_speakable`
   too; markdown had reached TTS.
+
+## Louder replies (0.4.39)
+
+- The device's only output control (the media player volume) was already at max, while the
+  TTS replies peaked around -9 dBFS. `audio.louder_flac` now peak-normalizes each FLAC reply
+  to -1 dBFS and adds `tts_gain_db` (default 4) with a soft limiter above 0.6 of full scale:
+  on a sample reply about 12 dB more average level with almost no limiting. FLAC is re-encoded
+  16-bit with the sample count, so playback length is known instead of guessed.
+- The end chime plays at 0.85 of full scale instead of 0.4.

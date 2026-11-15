@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType
 
-from .audio import flac_duration_seconds
+from .audio import flac_duration_seconds, louder_flac
 from .local_play import play_pcm_stream
 from .agent import AgentLoop, ConversationStore
 from .config import Settings
@@ -551,6 +551,8 @@ class VoicePipeline:
         the engine for the configured format; the device resamples to its 48 kHz pipeline."""
         fmt = self._s.tts_voice_format
         data = await self._tts.synth_encoded(reply, fmt)
+        if fmt == "flac":
+            data = await asyncio.to_thread(louder_flac, data, self._s.tts_gain_db)
         name = f"{uuid.uuid4().hex}.{fmt}"
         self._audio_srv.publish(name, data, _CONTENT_TYPES.get(fmt, "application/octet-stream"))
         url = self._audio_srv.url_for(name)

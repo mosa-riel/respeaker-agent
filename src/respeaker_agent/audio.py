@@ -74,13 +74,39 @@ def make_chime_flac(rate: int = 24000) -> bytes:
     fade = int(rate * 0.05)
     env = np.ones(sig.shape[0])
     env[-fade:] = np.linspace(1, 0, fade)
-    sig = (sig * env * 0.4).astype(np.float32)
+    sig = (sig * env * 0.85).astype(np.float32)  # near full scale: the device volume is already at max
     # Lead-in silence: an external speaker's amplifier wakes on the first audio and swallowed
     # most of this short chime (2026-11-15, chime often inaudible).
     sig = np.concatenate([np.zeros(int(rate * 0.3), dtype=np.float32), sig])
     buf = io.BytesIO()
     sf.write(buf, sig, rate, format="FLAC")
     return buf.getvalue()
+
+
+def louder_flac(data: bytes, extra_db: float = 4.0) -> bytes:
+    """Make a TTS reply as loud as the device allows. The reSpeaker's only output control (its
+    media player volume) is at max, while Voxtral replies peak around -9 dBFS. Normalize the peak
+    to -1 dBFS, then add `extra_db` with a soft limiter: samples above 0.6 bend smoothly towards
+    0.95 instead of clipping, so speech gets louder without crackle. Returns FLAC (16-bit, with
+    the sample count in STREAMINFO); on any problem the original bytes."""
+    import soundfile as sf
+
+    try:
+        x, rate = sf.read(io.BytesIO(data), dtype="float32")
+        if x.ndim > 1:
+            x = x.mean(axis=1)
+        peak = float(np.max(np.abs(x))) if x.size else 0.0
+        if peak < 1e-4:
+            return data
+        y = x * (0.89 / peak) * 10 ** (max(0.0, extra_db) / 20)
+        t, c = 0.6, 0.95
+        over = np.abs(y) > t
+        y[over] = np.sign(y[over]) * (t + (c - t) * np.tanh((np.abs(y[over]) - t) / (c - t)))
+        buf = io.BytesIO()
+        sf.write(buf, y.astype(np.float32), rate, format="FLAC", subtype="PCM_16")
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - never lose the reply over loudness
+        return data
 
 
 def flac_duration_seconds(data: bytes) -> float | None:

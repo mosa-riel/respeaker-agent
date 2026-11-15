@@ -264,7 +264,8 @@ async def put_config(payload: dict) -> JSONResponse:
         if not (lo <= num <= hi):
             return JSONResponse({"ok": False, "error": f"{key} out of range ({lo}–{hi})"}, status_code=422)
         setattr(settings, key, num)
-    float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0), "vad_speech_prob": (0.1, 0.95)}
+    float_fields = {"llm_temperature": (0.0, 2.0), "device_volume": (0.0, 1.0), "vad_speech_prob": (0.1, 0.95),
+                    "tts_gain_db": (0.0, 12.0)}
     for key, (lo, hi) in float_fields.items():
         if key not in payload:
             continue
